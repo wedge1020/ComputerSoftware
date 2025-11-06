@@ -350,10 +350,10 @@ int main( int NumberOfArguments, char* Arguments[] )
                     ||  Event.window.event == SDL_WINDOWEVENT_FOCUS_LOST )
                     {
                         LOG("Focus lost");
-                        WindowActive = false;
-                        MouseIsOnWindow = false;
-                        EventProcessor = &SDL_WaitEvent;
-                        Emulator.Pause();
+                        //WindowActive = false;
+                        //MouseIsOnWindow = false;
+                        //EventProcessor = &SDL_WaitEvent;
+                        //Emulator.Pause();
                     }
                     
                     // on these cases, window updates are resumed

@@ -42,6 +42,9 @@
     using namespace std;
     using namespace V32;
 // *****************************************************************************
+const int numHistory = 500;
+float cpuHistory[numHistory];
+float gpuHistory[numHistory];
 
 
 // =============================================================================
@@ -1206,6 +1209,17 @@ void ProcessMenuHelp()
     ImGui::EndMenu();
 }
 
+void ProcessGraphs()
+{
+  for (int i = numHistory-1; i > 0; i--)
+  {
+    cpuHistory[i] = cpuHistory[i-1];
+    gpuHistory[i] = gpuHistory[i-1];
+  }
+  cpuHistory[0] = Console.GetCPULoad();
+  gpuHistory[0] = Console.GetGPULoad();  
+}
+
 // -----------------------------------------------------------------------------
 
 void ProcessLabelCPU()
@@ -1225,7 +1239,9 @@ void ProcessLabelCPU()
     {
         int CPULoad = Console.GetCPULoad();
         int GPULoad = Console.GetGPULoad();
-        ImGui::Text( "CPU %d%%, GPU %d%%", CPULoad, GPULoad );
+        int CPUHigh = Console.GetCPUHigh();
+        int GPUHigh = Console.GetGPUHigh();
+        ImGui::Text( "C:%d|%d G:%d|%d", CPULoad,CPUHigh, GPULoad,GPUHigh );
     }
     
     ImGui::PopStyleVar();
@@ -1276,7 +1292,7 @@ void ShowEmulatorWindow()
       NoSignalTexture.Draw( 0, 0, Constants::ScreenWidth, Constants::ScreenHeight );
     
     // if GUI is showing, darken the screen
-    if( GUIMustBeDrawn() )
+    if( GUIMustBeDrawn() && !Emulator.IsPowerOn())
       Video.ClearScreen( GPUColor{ 0, 16, 32, 210 } );
     
     // now restore the console's render parameters
@@ -1321,6 +1337,14 @@ void RenderGUI()
         
         ImGui::EndMainMenuBar();
     }
+    ProcessGraphs();
+    if(Emulator.IsPowerOn())
+    {
+        ImGui::BeginTooltip();
+        ImGui::PlotLines("CPU", cpuHistory, numHistory, 0, NULL, 0, 100, ImVec2(200,50));
+        ImGui::PlotLines("GPU", gpuHistory, numHistory, 0, NULL, 0, 100, ImVec2(200,50));
+        ImGui::EndTooltip();
+    }
     
     // (2) Render imgui
     if( GUIMustBeDrawn() )
@@ -1331,10 +1355,10 @@ void RenderGUI()
     else ImGui::EndFrame();
     
     // pause the emulator when GUI is used
-    if( GUIMustBeDrawn() )
-      Emulator.Pause();
+    //if( GUIMustBeDrawn() )
+    //  Emulator.Pause();
     
-    else if( Emulator.IsPaused() )
+    if( Emulator.IsPaused() )
       Emulator.Resume();
     
     // now restore the console's render parameters
