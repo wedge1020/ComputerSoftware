@@ -2,6 +2,7 @@
     // include project files
     #include "CheckUnaryOperations.hpp"
     #include "CompilerInfrastructure.hpp"
+    #include "CheckNodes.hpp"
 // *****************************************************************************
 
 
@@ -45,6 +46,10 @@ void CheckIncrement( UnaryOperationNode* Operation )
     // also, the operand must be stored in memory
     if( !Operation->Operand->HasMemoryPlacement() )
       RaiseError( Operation->Location, "increment can only operate on a memory address" );
+    
+    // cannot increment a const-qualified location
+    if( ExpressionIsConstLocation( Operation->Operand ) )
+      RaiseError( Operation->Location, "cannot increment a const-qualified value" );
 }
 
 // -----------------------------------------------------------------------------
@@ -62,6 +67,10 @@ void CheckDecrement( UnaryOperationNode* Operation )
     // also, the operand must be stored in memory
     if( !Operation->Operand->HasMemoryPlacement() )
       RaiseError( Operation->Location, "decrement can only operate on a memory address" );
+    
+    // cannot decrement a const-qualified location
+    if( ExpressionIsConstLocation( Operation->Operand ) )
+      RaiseError( Operation->Location, "cannot decrement a const-qualified value" );
 }
 
 // -----------------------------------------------------------------------------
@@ -92,7 +101,12 @@ void CheckBitwiseNot( UnaryOperationNode* Operation )
 
 void CheckReference( UnaryOperationNode* Operation )
 {
-    // reference can only operate with memory
+    // special case: taking the address of a named function is always valid
+    if( Operation->Operand->Type() == CNodeTypes::ExpressionAtom )
+      if( ((ExpressionAtomNode*)Operation->Operand)->AtomType == AtomTypes::Function )
+        return;
+    
+    // for everything else, reference can only operate with memory
     if( !Operation->Operand->HasMemoryPlacement() )
       RaiseError( Operation->Location, "reference can only be applied to a memory address" );
 }
@@ -107,13 +121,34 @@ void CheckDereference( UnaryOperationNode* Operation )
     if( OperandType->Type() != DataTypes::Pointer )
       RaiseError( Operation->Location, "dereference can only be applied to a pointer" );
       
-    // void* pointers cannot be dereferenced
-    // (since that would produce a void value)
     else
     {
         PointerType* OperandPointerType = (PointerType*)OperandType;
         
+        // void* pointers cannot be dereferenced
+        // (since that would produce a void value)
         if( OperandPointerType->BaseType->Type() == DataTypes::Void )
           RaiseError( Operation->Location, "pointers to void cannot be dereferenced" );
+        
+        // function pointers can only be dereferenced when used directly
+        // as the callee of an indirect call, with call syntax (*fp)()
+        else if( OperandPointerType->BaseType->Type() == DataTypes::Function )
+        {
+            CNode* CurrentNode = Operation;
+            
+            while( CurrentNode->Parent && CurrentNode->Parent->IsExpression() )
+            {
+                if( CurrentNode->Parent->Type() == CNodeTypes::IndirectCall )
+                  return;
+                
+                // there could be any number of parenthesis, but nothing else
+                if( CurrentNode->Parent->Type() == CNodeTypes::EnclosedExpression )
+                  CurrentNode = CurrentNode->Parent;
+                
+                else break;
+            }
+            
+            RaiseError( Operation->Location, "function pointers can only be dereferenced when calling them" );
+        }
     }        
 }

@@ -22,7 +22,8 @@ enum class DataTypes
     Array,
     Structure,
     Union,
-    Enumeration
+    Enumeration,
+    Function
 };
 
 // -----------------------------------------------------------------------------
@@ -44,7 +45,12 @@ class DataType
 {
     public:
         
+        bool IsConst;
+        
+    public:
+        
         // instance handling
+        DataType() : IsConst( false ) {}
         virtual ~DataType() {}
         
         // basic properties
@@ -247,16 +253,45 @@ class EnumerationType: public DataType
 };
 
 
+// -----------------------------------------------------------------------------
+
+// represents a function signature: return type + parameter types;
+// its size is 0 so that it cannot be evaluated or stored directly
+class FunctionType: public DataType
+{
+    public:
+        
+        DataType* ReturnType;
+        std::list< DataType* > ParameterTypes;
+        
+    public:
+        
+        // instance handling
+        FunctionType( DataType* ReturnType_, std::list< DataType* > ParameterTypes_ );
+        virtual ~FunctionType();
+        
+        // basic properties
+        virtual DataTypes Type() { return DataTypes::Function; }
+        virtual unsigned SizeInWords() { return 0; }
+        virtual std::string ToString();
+        
+        // basic manipulation
+        virtual DataType* Clone();
+};
+
+
 // =============================================================================
 //      DATA TYPE OPERATION
 // =============================================================================
 
 
-bool AreEqual( DataType* T1, DataType* T2 );
+bool AreEqual( DataType* T1, DataType* T2, bool IncludeConst = false );
+bool AreConstCompatible( DataType* LeftType, DataType* RightType );
 bool TypeIsThisPrimitive( DataType* T, PrimitiveTypes Primitive );
 bool TypeIsIntegral( DataType* T );
 bool TypeIsNumeric( DataType* T );
 bool TypeIsFloat( DataType* T );
+bool TypeIsFunctionPointer( DataType* T );
 
 
 // *****************************************************************************

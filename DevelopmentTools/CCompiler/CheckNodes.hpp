@@ -14,7 +14,8 @@
 
 
 void CheckExpression( ExpressionNode* Expression );
-void CheckAssignmentTypes( SourceLocation Location, DataType* LeftType, ExpressionNode* RightValue );
+void CheckAssignmentTypes( SourceLocation Location, DataType* LeftType, ExpressionNode* RightValue, bool IsInitialization = false );
+bool ExpressionIsConstLocation( ExpressionNode* Expression );
 
 
 // =============================================================================
@@ -24,6 +25,7 @@ void CheckAssignmentTypes( SourceLocation Location, DataType* LeftType, Expressi
 
 void CheckExpressionAtom( ExpressionAtomNode* Atom );
 void CheckFunctionCall( FunctionCallNode* FunctionCall );
+void CheckIndirectCall( IndirectCallNode* IndirectCall );
 void CheckArrayAccess( ArrayAccessNode* ArrayAccess );
 void CheckUnaryOperation( UnaryOperationNode* Operation );
 void CheckBinaryOperation( BinaryOperationNode* Operation );

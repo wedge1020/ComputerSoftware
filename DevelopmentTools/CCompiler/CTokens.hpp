@@ -46,7 +46,11 @@ enum class KeywordTypes
     Void,
     Bool,
     Int,
+    Char,
+    Short,
+    Long,
     Float,
+    Double,
     If,
     Else,
     While,
@@ -67,7 +71,8 @@ enum class KeywordTypes
     Typedef,
     Asm,
     Embedded,
-    Extern
+    Extern,
+    Const
 };
 
 // -----------------------------------------------------------------------------
