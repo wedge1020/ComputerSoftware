@@ -60,8 +60,8 @@ namespace V32
             uint32_t BiosRevision;
             
             // performance info (given in %)
-            float LastCPULoads[ 2 ];
-            float LastGPULoads[ 2 ];
+            float LastCPULoads[ 3 ];
+            float LastGPULoads[ 3 ];
             
         public:
             
@@ -83,6 +83,9 @@ namespace V32
             bool IsCPUHalted();
             float GetCPULoad();
             float GetGPULoad();
+            float GetCPUHigh();
+            float GetGPUHigh();
+			void ResetMaxCpuGpuUsage();
             
             // bios management
             // (bios cannot be unloaded, but some implementations may need it)

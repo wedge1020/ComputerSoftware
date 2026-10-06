@@ -60,8 +60,8 @@ namespace V32
         PowerIsOn = false;
         
         // initial loads are 0
-        LastCPULoads[ 0 ] = LastCPULoads[ 1 ] = 0;
-        LastGPULoads[ 0 ] = LastGPULoads[ 1 ] = 0;
+        LastCPULoads[ 0 ] = LastCPULoads[ 1 ] = LastCPULoads[ 2 ] = 0;
+        LastGPULoads[ 0 ] = LastGPULoads[ 1 ] = LastGPULoads[ 2 ] = 0;
         
         // do NOT reset until power on
     }
@@ -122,12 +122,18 @@ namespace V32
         RAM.ClearContents();
         
         // loads become 0 on a reset
-        LastCPULoads[ 0 ] = LastCPULoads[ 1 ] = 0;
-        LastGPULoads[ 0 ] = LastGPULoads[ 1 ] = 0;
+        LastCPULoads[ 0 ] = LastCPULoads[ 1 ] = LastCPULoads[ 2 ] = 0;
+        LastGPULoads[ 0 ] = LastGPULoads[ 1 ] = LastGPULoads[ 2 ] = 0;
     }
     
     // -----------------------------------------------------------------------------
     
+    void V32Console::ResetMaxCpuGpuUsage()
+    {
+        LastCPULoads[ 2 ] = 0;
+        LastGPULoads[ 2 ] = 0;
+    }
+
     void V32Console::RunNextFrame()
     {
         // do nothing when not applicable
@@ -166,10 +172,14 @@ namespace V32
         // after runnning the frame, update load info
         LastCPULoads[ 1 ] = LastCPULoads[ 0 ];
         LastCPULoads[ 0 ] = 100.0 * Timer.CycleCounter / Constants::CyclesPerFrame;
-        
+        if(LastCPULoads[ 0 ] > LastCPULoads[ 2 ])
+		LastCPULoads[ 2 ] = LastCPULoads[ 0 ];
+
         int GPUUsedPixels = Constants::GPUPixelCapacityPerFrame - max( 0, GPU.RemainingPixels );
         LastGPULoads[ 1 ] = LastGPULoads[ 0 ];
         LastGPULoads[ 0 ] = 100.0 * GPUUsedPixels / Constants::GPUPixelCapacityPerFrame;
+		if(LastGPULoads[ 0 ] > LastGPULoads[ 2 ])
+                LastGPULoads[ 2 ] = LastGPULoads[ 0 ];
         
         // STEP 3: save memory card to file when modified
         if( MemoryCardController.PendingSave )
@@ -212,6 +222,16 @@ namespace V32
     {
         // same reasoning as for CPU load
         return max( LastGPULoads[ 0 ], LastGPULoads[ 1 ] );
+    }
+    
+    float V32Console::GetCPUHigh()
+    {
+      return LastCPULoads[ 2 ];
+    }
+    
+    float V32Console::GetGPUHigh()
+    {
+      return LastGPULoads[ 2 ];
     }
     
     

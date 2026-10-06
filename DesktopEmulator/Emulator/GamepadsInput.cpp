@@ -521,7 +521,11 @@ void GamepadsInput::ProcessEvent( SDL_Event Event )
             
             else
               ProcessKeyUp( Event );
+			break;
             
+		case SDL_MOUSEBUTTONDOWN:
+			if(Event.button.button == SDL_BUTTON_RIGHT)
+				Console.ResetMaxCpuGpuUsage();
             break;
     }
 }
