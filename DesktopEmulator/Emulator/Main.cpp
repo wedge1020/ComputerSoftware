@@ -353,6 +353,7 @@ int main( int NumberOfArguments, char* Arguments[] )
                         WindowActive = false;
                         MouseIsOnWindow = false;
                         EventProcessor = &SDL_WaitEvent;
+                        Gamepads.ReleaseV32Mouse();
                         Emulator.Pause();
                     }
                     
@@ -390,9 +391,32 @@ int main( int NumberOfArguments, char* Arguments[] )
                 {
                     SDL_Keycode Key = Event.key.keysym.sym;
                     
-                    // Escape key toggles showing GUI
-                    if( Key == SDLK_ESCAPE )
+                    // Escape key toggles showing GUI (but while v32mouse
+                    // has the mouse captured, Escape is left for the program)
+                    if( Key == SDLK_ESCAPE && !Gamepads.IsV32MouseCaptured() )
                       MouseIsOnWindow = !MouseIsOnWindow;
+                    
+                    // while v32mouse has the mouse captured, left Ctrl + left
+                    // Alt (left Control + left Option on Mac) releases it and
+                    // shows the GUI, since the host pointer is now visible.
+                    // Only LEFT Alt is accepted: AltGr in many layouts is sent
+                    // as left Ctrl + right Alt, and must not release the mouse.
+                    // This combination is not a system shortcut on any of our
+                    // platforms, so the keyboard does not need to be grabbed
+                    if( Gamepads.IsV32MouseCaptured() )
+                    {
+                        SDL_Scancode Scancode = Event.key.keysym.scancode;
+                        Uint16 Modifiers = Event.key.keysym.mod;
+                        
+                        bool IsReleaseKey = (Scancode == SDL_SCANCODE_LCTRL || Scancode == SDL_SCANCODE_LALT);
+                        bool BothHeld = (Modifiers & KMOD_LCTRL) && (Modifiers & KMOD_LALT);
+                        
+                        if( IsReleaseKey && BothHeld )
+                        {
+                            Gamepads.ReleaseV32Mouse();
+                            MouseIsOnWindow = true;
+                        }
+                    }
                     
                     // Key F5 resets the machine
                     if( Key == SDLK_F5 ) Emulator.Reset();
@@ -481,6 +505,9 @@ int main( int NumberOfArguments, char* Arguments[] )
                   Gamepads.ProcessEvent( Event );
             }
             
+            // give the mouse back if v32mouse can no longer use it
+            Gamepads.CheckV32MouseCapture();
+            
             // update frame only when needed
             if( !WindowActive ) continue;
             
@@ -501,6 +528,9 @@ int main( int NumberOfArguments, char* Arguments[] )
                 {
                     // v32kbd reports 1 key event per frame
                     Gamepads.UpdateV32Kbd();
+                    
+                    // v32mouse reports buttons and movement every frame
+                    Gamepads.UpdateV32Mouse();
                     
                     // run another frame
                     Emulator.RunNextFrame();

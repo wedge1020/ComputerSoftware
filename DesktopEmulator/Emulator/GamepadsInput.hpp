@@ -114,7 +114,8 @@ enum class DeviceTypes
     NoDevice,
     Keyboard,       // a few keys mapped to gamepad controls
     Joystick,
-    V32Kbd          // full keyboard: scancodes encoded as gamepad controls
+    V32Kbd,         // full keyboard: scancodes encoded as gamepad controls
+    V32Mouse        // host mouse: buttons and movement encoded as gamepad controls
 };
 
 // -----------------------------------------------------------------------------
@@ -194,6 +195,91 @@ struct V32KbdEvent
 
 // -----------------------------------------------------------------------------
 
+// name used for the v32mouse device, both in the
+// gamepads menu and as profile name in settings
+#define V32MOUSE_PROFILE_NAME "v32mouse"
+
+// A v32mouse device presents itself to the console as a regular gamepad,
+// but its 11 controls are used to report the host mouse (this is the same
+// protocol as the v32io hardware adapter in mouse mode, "v32io:mouse"):
+//
+//   Start, A, B --> middle, left and right mouse buttons, as they are
+//   Left / Right, X, Y  --> X counter: trit (Left = -, Right = +),
+//                           Gray code (X = high bit, Y = low bit)
+//   Up / Down,    L, R  --> Y counter: trit (Up = -, Down = +),
+//                           Gray code (L = high bit, R = low bit)
+//
+// Movement is not sent as deltas, but as the position of 2 counters (one
+// per axis) that go around a cycle of 12 positions. Moving right / down
+// steps forward, left / up steps backward. Every single step changes
+// exactly 1 control:
+//
+//   position:  0  1  2 | 3  4  5 | 6  7  8 | 9 10 11
+//   gray:        00    |   01    |   11    |   10
+//   trit:      -  0  + | +  0  - | -  0  + | +  0  -
+//
+// At rest (when the gamepad gets connected) both counters are at position
+// 1, which has no controls pressed. Programs compare positions between
+// frames, so a counter can move at most 5 positions per frame (6 would be
+// ambiguous). A trit is a pair of opposite directions, which the console
+// never shows pressed together, so all states are valid gamepad states.
+//
+// Since the host mouse can't be shared with the GUI, it is only reported
+// while captured: click on the game screen to capture it, and press left
+// Ctrl + left Alt (left Control + left Option on Mac) to release it.
+// Switching to another window also releases it.
+namespace V32Mouse
+{
+    // positions in each counter cycle
+    const int Positions = 12;
+    
+    // counter position when nothing is pressed
+    const int RestPosition = 1;
+    
+    // most steps a counter can move in a single frame
+    const int MaxStepsPerFrame = 5;
+    
+    // movement waiting to be sent over this many steps is discarded,
+    // so that the pointer stops soon after the host mouse does
+    const int MaxPendingSteps = 10;
+    
+    // host mouse motion units (raw counts in relative mode) that make
+    // 1 step of a counter: lower values give a faster pointer
+    const int DefaultCountsPerStep = 2;
+    const int MinCountsPerStep = 1;
+    const int MaxCountsPerStep = 16;
+    
+    // indices for the mouse buttons
+    enum Buttons
+    {
+        Button_Left = 0,
+        Button_Right,
+        Button_Middle,
+        ButtonsCount
+    };
+    
+    // pending button changes over this limit are discarded
+    const unsigned MaxQueuedChanges = 16;
+    
+    // gamepad control used to report each mouse button
+    extern const V32::GamepadControls ButtonControls[ ButtonsCount ];
+    
+    // the 4 gamepad controls that make up a movement counter
+    struct CounterControls
+    {
+        V32::GamepadControls Negative, Positive;    // trit
+        V32::GamepadControls High, Low;             // Gray code
+    };
+    
+    extern const CounterControls CounterX;
+    extern const CounterControls CounterY;
+    
+    // converts SDL mouse buttons to our indices (-1 for unsupported ones)
+    int GetButtonIndex( Uint8 SDLButton );
+}
+
+// -----------------------------------------------------------------------------
+
 // full identification of a host computer device
 struct DeviceInfo
 {
@@ -245,6 +331,20 @@ class GamepadsInput
         // key events pending to be reported by the v32kbd device
         std::deque< V32KbdEvent > V32KbdQueue;
         
+        // v32mouse device: whether the host mouse is captured by it,
+        // host mouse motion not yet sent (in host motion units), and
+        // button changes pending to be shown (at most 1 per frame,
+        // so that even the quickest clicks are seen by programs)
+        bool V32MouseCaptured;
+        int V32MousePendingX, V32MousePendingY;
+        std::deque< bool > V32MouseButtonQueues[ V32Mouse::ButtonsCount ];
+        bool V32MouseButtonTargets[ V32Mouse::ButtonsCount ];
+    
+    public:
+        
+        // v32mouse device: host motion units per counter step
+        int V32MouseCountsPerStep;
+    
     public:
         
         // maps {Vircon gamepads} --> {PC devices}
@@ -262,6 +362,12 @@ class GamepadsInput
         void ProcessKeyDown( SDL_Event Event );
         void ProcessKeyUp( SDL_Event Event );
         void ProcessV32KbdKey( SDL_Event Event );
+        void ProcessV32MouseMotion( SDL_Event Event );
+        void ProcessV32MouseButton( SDL_Event Event );
+        
+        // v32mouse helpers
+        void ClearV32MouseInput();
+        bool V32MouseCanCapture();
         
     public:
         
@@ -285,10 +391,25 @@ class GamepadsInput
         // queries on device usage (-1 = not used in any gamepad)
         int GetKeyboardGamepad();
         int GetV32KbdGamepad();
+        int GetV32MouseGamepad();
         
         // v32kbd device: call this exactly once before every emulated
         // frame, to report the next pending key event (if there is any)
         void UpdateV32Kbd();
+        
+        // v32mouse device: call this exactly once before every emulated
+        // frame, to report button changes and movement since the last one
+        void UpdateV32Mouse();
+        
+        // v32mouse device: capturing the host mouse. Releasing is
+        // always safe (it does nothing when not captured)
+        bool IsV32MouseCaptured();
+        void CaptureV32Mouse();
+        void ReleaseV32Mouse();
+        
+        // v32mouse device: call this once per main loop iteration;
+        // it releases the mouse when it can no longer be captured
+        void CheckV32MouseCapture();
         
         // processing input events
         void ProcessEvent( SDL_Event Event );

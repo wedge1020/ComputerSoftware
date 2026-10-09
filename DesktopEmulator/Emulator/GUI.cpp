@@ -1020,6 +1020,9 @@ void ProcessMenuGamepads()
     bool KeyboardIsUsed = (Gamepads.GetKeyboardGamepad() >= 0);
     bool V32KbdIsUsed   = (Gamepads.GetV32KbdGamepad()   >= 0);
     
+    // the mouse can also be used by a single gamepad, as v32mouse
+    bool V32MouseIsUsed = (Gamepads.GetV32MouseGamepad() >= 0);
+    
     // show devices for the 4 gamepads
     for( int Gamepad = 0; Gamepad < 4; Gamepad++ )
     {
@@ -1070,6 +1073,23 @@ void ProcessMenuGamepads()
             if( DisableV32Kbd )
               ImGui::PopStyleVar();
             
+            // v32mouse can only be used by 1 gamepad
+            OptionSelected = (Gamepads.MappedGamepads[ Gamepad ].Type == DeviceTypes::V32Mouse);
+            
+            bool DisableV32Mouse = V32MouseIsUsed && !OptionSelected;
+            
+            if( DisableV32Mouse )
+              ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+            
+            if( ImGui::MenuItem( V32MOUSE_PROFILE_NAME, nullptr, OptionSelected, !DisableV32Mouse ) )
+            {
+                Gamepads.MappedGamepads[ Gamepad ].Type = DeviceTypes::V32Mouse;
+                Gamepads.AssignInputDevices();
+            }
+            
+            if( DisableV32Mouse )
+              ImGui::PopStyleVar();
+            
             // show every available profile
             auto JoystickProfiles = Gamepads.ReadAllJoystickProfiles();
             
@@ -1089,6 +1109,39 @@ void ProcessMenuGamepads()
             
             ImGui::EndMenu();
         }
+    }
+    
+    // v32mouse sensitivity: host mouse motion per counter step
+    // (only shown when the device is in use)
+    if( V32MouseIsUsed )
+    {
+        ImGui::Separator();
+        
+        if( ImGui::BeginMenu( V32MOUSE_PROFILE_NAME " speed" ) )
+        {
+            const int Options[] = { 1, 2, 3, 4, 6, 8 };
+            
+            for( int CountsPerStep: Options )
+            {
+                string OptionText = to_string( CountsPerStep ) + (CountsPerStep == 1? " count" : " counts") + " per step";
+                
+                if( CountsPerStep == V32Mouse::DefaultCountsPerStep )
+                  OptionText += " (default)";
+                
+                bool OptionSelected = (Gamepads.V32MouseCountsPerStep == CountsPerStep);
+                
+                if( ImGui::MenuItem( OptionText.c_str(), nullptr, OptionSelected, true ) )
+                  Gamepads.V32MouseCountsPerStep = CountsPerStep;
+            }
+            
+            ImGui::EndMenu();
+        }
+        
+        #if defined(__APPLE__)
+          ImGui::TextDisabled( "Click game to capture mouse, left Control+Option releases" );
+        #else
+          ImGui::TextDisabled( "Click game to capture mouse, left Ctrl+Alt releases" );
+        #endif
     }
     
     ImGui::EndMenu();
@@ -1256,6 +1309,10 @@ void ProcessLabelCPU()
 // sensible policy to decide when it is actually needed
 bool GUIMustBeDrawn()
 {
+    // while v32mouse has the mouse captured the GUI can't be used
+    if( Gamepads.IsV32MouseCaptured() )
+      return false;
+    
     if( Video.IsFullScreen() )
       return ImGui::GetIO().WantCaptureMouse;
     
@@ -1317,7 +1374,22 @@ void RenderGUI()
     
     // start new frame in imgui
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplSDL2_NewFrame( Video.GetWindow() );
+    
+    // while v32mouse has the mouse captured, the SDL backend is
+    // skipped: it would read the mouse (so clicks on the game could
+    // operate the invisible GUI), and also show the host pointer and
+    // capture the mouse on its own, interfering with relative mode
+    if( Gamepads.IsV32MouseCaptured() )
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        io.MousePos = ImVec2( -FLT_MAX, -FLT_MAX );
+        
+        for( bool& ButtonDown: io.MouseDown )
+          ButtonDown = false;
+    }
+    
+    else ImGui_ImplSDL2_NewFrame( Video.GetWindow() );
+    
     ImGui::NewFrame();
     
     // show the main menu bar

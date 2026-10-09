@@ -4,11 +4,16 @@
     
     // include infrastructure headers
     #include "DesktopInfrastructure/Logger.hpp"
+    #include "DesktopInfrastructure/NumericFunctions.hpp"
     
     // include emulator headers
     #include "GamepadsInput.hpp"
+    #include "EmulatorControl.hpp"
     #include "GUI.hpp"
     #include "Globals.hpp"
+    
+    // include imgui headers
+    #include <imgui/imgui.h>    // [ Dear ImGui ] Main header
     
     // include C/C++ headers
     #include <stdexcept>        // [ C++ STL ] Exceptions
@@ -112,6 +117,42 @@ int V32Kbd::GetKeyCode( SDL_Scancode Scancode )
 
 // -----------------------------------------------------------------------------
 
+// gamepad control used to report each v32mouse button
+const GamepadControls V32Mouse::ButtonControls[ V32Mouse::ButtonsCount ] =
+{
+    GamepadControls::ButtonA,       // left button   (port 0x407)
+    GamepadControls::ButtonB,       // right button  (port 0x408)
+    GamepadControls::ButtonStart    // middle button (port 0x406)
+};
+
+// gamepad controls used by each v32mouse movement counter
+const V32Mouse::CounterControls V32Mouse::CounterX =
+{
+    GamepadControls::Left,  GamepadControls::Right,     // trit
+    GamepadControls::ButtonX, GamepadControls::ButtonY  // Gray code
+};
+
+const V32Mouse::CounterControls V32Mouse::CounterY =
+{
+    GamepadControls::Up,    GamepadControls::Down,      // trit
+    GamepadControls::ButtonL, GamepadControls::ButtonR  // Gray code
+};
+
+// -----------------------------------------------------------------------------
+
+int V32Mouse::GetButtonIndex( Uint8 SDLButton )
+{
+    switch( SDLButton )
+    {
+        case SDL_BUTTON_LEFT:   return Button_Left;
+        case SDL_BUTTON_RIGHT:  return Button_Right;
+        case SDL_BUTTON_MIDDLE: return Button_Middle;
+        default:                return -1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+
 JoystickControl::JoystickControl()
 {
     Type = JoystickControlTypes::None;
@@ -189,6 +230,11 @@ GamepadsInput::GamepadsInput()
     // command buttons are all initially unpressed
     for( int Gamepad = 0; Gamepad < Constants::GamepadPorts; Gamepad++ )
       CommandPressed[ Gamepad ] = false;
+    
+    // v32mouse starts not captured, with no pending input
+    V32MouseCaptured = false;
+    V32MouseCountsPerStep = V32Mouse::DefaultCountsPerStep;
+    ClearV32MouseInput();
 }
 
 // -----------------------------------------------------------------------------
@@ -323,9 +369,15 @@ void GamepadsInput::AssignInputDevices()
     set< SDL_JoystickID > MappedInstanceIDs;
     bool IsKeyboardUsed = false;
     
+    bool IsMouseUsed = false;
+    
     // any change in devices discards pending v32kbd events; that
     // gamepad gets disconnected here so its controls are all reset
     V32KbdQueue.clear();
+    
+    // the same applies to v32mouse (on reconnection its counters
+    // will be back at rest, which is what programs expect)
+    ClearV32MouseInput();
     
     // update mappings for gamepads
     for( int Gamepad = 0; Gamepad < Constants::GamepadPorts; Gamepad++ )
@@ -370,6 +422,22 @@ void GamepadsInput::AssignInputDevices()
             continue;
         }
         
+        if( GamepadDevice->Type == DeviceTypes::V32Mouse )
+        {
+            // there is a single host mouse: allow only 1 gamepad
+            // to use it (it is independent of the keyboard)
+            if( IsMouseUsed )
+              GamepadDevice->Type = DeviceTypes::NoDevice;
+            
+            else
+            {
+                IsMouseUsed = true;
+                Console.SetGamepadConnection( Gamepad, true );
+            }
+            
+            continue;
+        }
+        
         // preemptively set an unused instance ID in case errors happen
         GamepadDevice->InstanceID = -1;
         
@@ -393,6 +461,10 @@ void GamepadsInput::AssignInputDevices()
             }
         }
     }
+    
+    // with no v32mouse in use, give the host mouse back
+    if( !IsMouseUsed )
+      ReleaseV32Mouse();
 }
 
 // -----------------------------------------------------------------------------
@@ -412,6 +484,17 @@ int GamepadsInput::GetV32KbdGamepad()
 {
     for( int Gamepad = 0; Gamepad < Constants::GamepadPorts; Gamepad++ )
       if( MappedGamepads[ Gamepad ].Type == DeviceTypes::V32Kbd )
+        return Gamepad;
+    
+    return -1;
+}
+
+// -----------------------------------------------------------------------------
+
+int GamepadsInput::GetV32MouseGamepad()
+{
+    for( int Gamepad = 0; Gamepad < Constants::GamepadPorts; Gamepad++ )
+      if( MappedGamepads[ Gamepad ].Type == DeviceTypes::V32Mouse )
         return Gamepad;
     
     return -1;
@@ -482,6 +565,272 @@ void GamepadsInput::ProcessV32KbdKey( SDL_Event Event )
 
 
 // =============================================================================
+//      GAMEPADS INPUT: V32MOUSE DEVICE
+// =============================================================================
+
+
+// reads the current position of a v32mouse counter from the console's
+// gamepad state (and not from a variable of ours) so that it will still
+// be right after loading a state
+static int ReadV32MouseCounter( int Gamepad, const V32Mouse::CounterControls& Counter )
+{
+    int32_t* ControlStates = &Console.GamepadController.RealTimeGamepadStates[ Gamepad ].Left;
+    
+    bool NegativePressed = (ControlStates[ (int)Counter.Negative ] > 0);
+    bool PositivePressed = (ControlStates[ (int)Counter.Positive ] > 0);
+    bool HighPressed     = (ControlStates[ (int)Counter.High     ] > 0);
+    bool LowPressed      = (ControlStates[ (int)Counter.Low      ] > 0);
+    
+    // Gray code to group: 00 -> 0, 01 -> 1, 11 -> 2, 10 -> 3
+    int Group = HighPressed? (LowPressed? 2 : 3) : (LowPressed? 1 : 0);
+    
+    // trit: 0 = negative, 1 = none, 2 = positive
+    // (the console never has both of them pressed)
+    int Trit = NegativePressed? 0 : (PositivePressed? 2 : 1);
+    
+    // odd groups walk the trit backwards
+    return 3 * Group + ((Group & 1)? 2 - Trit : Trit);
+}
+
+// -----------------------------------------------------------------------------
+
+// sets the controls of a v32mouse counter for the given position
+static void WriteV32MouseCounter( int Gamepad, const V32Mouse::CounterControls& Counter, int Position )
+{
+    int Group = Position / 3;
+    int Index = Position % 3;
+    int Trit  = (Group & 1)? 2 - Index : Index;
+    int Gray  = Group ^ (Group >> 1);
+    
+    Console.SetGamepadControl( Gamepad, Counter.High, (Gray & 2) != 0 );
+    Console.SetGamepadControl( Gamepad, Counter.Low,  (Gray & 1) != 0 );
+    
+    // pressing a direction makes the console release the opposite one
+    if( Trit == 0 )
+      Console.SetGamepadControl( Gamepad, Counter.Negative, true );
+    
+    else if( Trit == 2 )
+      Console.SetGamepadControl( Gamepad, Counter.Positive, true );
+    
+    else
+    {
+        Console.SetGamepadControl( Gamepad, Counter.Negative, false );
+        Console.SetGamepadControl( Gamepad, Counter.Positive, false );
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+// moves a v32mouse counter as much as allowed in 1 frame, taking
+// those steps from the pending host motion (in host motion units)
+static void StepV32MouseCounter( int Gamepad, const V32Mouse::CounterControls& Counter, int& PendingMotion, int CountsPerStep )
+{
+    // integer division truncates towards 0, so any remainder is
+    // kept for later frames, and it keeps the motion's direction
+    int Steps = PendingMotion / CountsPerStep;
+    Clamp( Steps, -V32Mouse::MaxStepsPerFrame, V32Mouse::MaxStepsPerFrame );
+    
+    if( Steps == 0 )
+      return;
+    
+    PendingMotion -= Steps * CountsPerStep;
+    
+    int Position = ReadV32MouseCounter( Gamepad, Counter );
+    Position = (Position + Steps + V32Mouse::Positions) % V32Mouse::Positions;
+    WriteV32MouseCounter( Gamepad, Counter, Position );
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::ClearV32MouseInput()
+{
+    V32MousePendingX = 0;
+    V32MousePendingY = 0;
+    
+    for( int Button = 0; Button < V32Mouse::ButtonsCount; Button++ )
+    {
+        V32MouseButtonQueues[ Button ].clear();
+        V32MouseButtonTargets[ Button ] = false;
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::UpdateV32Mouse()
+{
+    // nothing to do when the device is not in use
+    int Gamepad = GetV32MouseGamepad();
+    
+    if( Gamepad < 0 || !Console.HasGamepad( Gamepad ) )
+    {
+        ClearV32MouseInput();
+        return;
+    }
+    
+    // buttons: show at most 1 change per frame for each one, so that
+    // a press and release within the same frame is never missed
+    for( int Button = 0; Button < V32Mouse::ButtonsCount; Button++ )
+    {
+        deque< bool >& Queue = V32MouseButtonQueues[ Button ];
+        
+        if( Queue.empty() )
+          continue;
+        
+        Console.SetGamepadControl( Gamepad, V32Mouse::ButtonControls[ Button ], Queue.front() );
+        Queue.pop_front();
+    }
+    
+    // movement: step both counters
+    StepV32MouseCounter( Gamepad, V32Mouse::CounterX, V32MousePendingX, V32MouseCountsPerStep );
+    StepV32MouseCounter( Gamepad, V32Mouse::CounterY, V32MousePendingY, V32MouseCountsPerStep );
+}
+
+// -----------------------------------------------------------------------------
+
+bool GamepadsInput::IsV32MouseCaptured()
+{
+    return V32MouseCaptured;
+}
+
+// -----------------------------------------------------------------------------
+
+bool GamepadsInput::V32MouseCanCapture()
+{
+    // the device must be in use
+    int Gamepad = GetV32MouseGamepad();
+    
+    if( Gamepad < 0 || !Console.HasGamepad( Gamepad ) )
+      return false;
+    
+    // and there must be a program running
+    return Emulator.IsPowerOn();
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::CaptureV32Mouse()
+{
+    if( V32MouseCaptured )
+      return;
+    
+    // relative mode hides the host pointer, keeps it within
+    // our window and reports motion even past screen edges
+    if( SDL_SetRelativeMouseMode( SDL_TRUE ) != 0 )
+    {
+        LOG( "v32mouse: cannot capture the mouse: " + string( SDL_GetError() ) );
+        return;
+    }
+    
+    LOG( "v32mouse: mouse captured" );
+    V32MouseCaptured = true;
+    
+    // motion before the capture is not reported
+    V32MousePendingX = 0;
+    V32MousePendingY = 0;
+    
+    // the GUI is not shown while the mouse is captured
+    MouseIsOnWindow = false;
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::ReleaseV32Mouse()
+{
+    if( !V32MouseCaptured )
+      return;
+    
+    SDL_SetRelativeMouseMode( SDL_FALSE );
+    
+    LOG( "v32mouse: mouse released" );
+    V32MouseCaptured = false;
+    
+    // discard pending motion
+    V32MousePendingX = 0;
+    V32MousePendingY = 0;
+    
+    // buttons held at this point will not get their release events
+    // reported, so programs need to see them released now
+    for( int Button = 0; Button < V32Mouse::ButtonsCount; Button++ )
+    {
+        if( !V32MouseButtonTargets[ Button ] )
+          continue;
+        
+        V32MouseButtonQueues[ Button ].push_back( false );
+        V32MouseButtonTargets[ Button ] = false;
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::CheckV32MouseCapture()
+{
+    if( V32MouseCaptured && !V32MouseCanCapture() )
+      ReleaseV32Mouse();
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::ProcessV32MouseMotion( SDL_Event Event )
+{
+    // motion is only reported while the mouse is captured
+    // (and touch screens are not taken as a mouse)
+    if( !V32MouseCaptured || Event.motion.which == SDL_TOUCH_MOUSEID )
+      return;
+    
+    // if the program is not reading the counters fast enough,
+    // discard the excess so that the pointer won't drift on
+    int MaxPending = V32Mouse::MaxPendingSteps * V32MouseCountsPerStep;
+    
+    V32MousePendingX += Event.motion.xrel;
+    V32MousePendingY += Event.motion.yrel;
+    Clamp( V32MousePendingX, -MaxPending, MaxPending );
+    Clamp( V32MousePendingY, -MaxPending, MaxPending );
+}
+
+// -----------------------------------------------------------------------------
+
+void GamepadsInput::ProcessV32MouseButton( SDL_Event Event )
+{
+    if( Event.button.which == SDL_TOUCH_MOUSEID )
+      return;
+    
+    bool Pressed = (Event.type == SDL_MOUSEBUTTONDOWN);
+    
+    // when not captured, a left click on the game screen captures the
+    // mouse. That click is not reported (its release is ignored too,
+    // since the button was never shown as pressed). Clicks on the GUI
+    // are left for it
+    if( !V32MouseCaptured )
+    {
+        if( Pressed && Event.button.button == SDL_BUTTON_LEFT )
+          if( V32MouseCanCapture() && !ImGui::GetIO().WantCaptureMouse )
+            CaptureV32Mouse();
+        
+        return;
+    }
+    
+    int Button = V32Mouse::GetButtonIndex( Event.button.button );
+    
+    if( Button < 0 )
+      return;
+    
+    // ignore redundant changes
+    if( Pressed == V32MouseButtonTargets[ Button ] )
+      return;
+    
+    // if the program is not reading buttons, skip
+    // to the latest state instead of growing the queue
+    deque< bool >& Queue = V32MouseButtonQueues[ Button ];
+    
+    if( Queue.size() >= V32Mouse::MaxQueuedChanges )
+      Queue.clear();
+    
+    Queue.push_back( Pressed );
+    V32MouseButtonTargets[ Button ] = Pressed;
+}
+
+
+// =============================================================================
 //      GAMEPADS INPUT: PROCESSING INPUT EVENTS
 // =============================================================================
 
@@ -522,6 +871,17 @@ void GamepadsInput::ProcessEvent( SDL_Event Event )
             else
               ProcessKeyUp( Event );
             
+            break;
+        
+        // the host mouse is only used by the v32mouse device
+        case SDL_MOUSEMOTION:
+            if( GetV32MouseGamepad() >= 0 )
+              ProcessV32MouseMotion( Event );
+            break;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+            if( GetV32MouseGamepad() >= 0 )
+              ProcessV32MouseButton( Event );
             break;
     }
 }

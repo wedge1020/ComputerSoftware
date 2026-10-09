@@ -544,7 +544,15 @@ void LoadSettings( const string& FilePath )
                 continue;
             }
             
-            // CASE D: other names are considered joystick profiles
+            // CASE D: the v32mouse device (also a reserved name)
+            if( ToLowerCase( ProfileName ) == V32MOUSE_PROFILE_NAME )
+            {
+                Gamepads.MappedGamepads[ Gamepad ].Type = DeviceTypes::V32Mouse;
+                Console.SetGamepadConnection( Gamepad, true );
+                continue;
+            }
+            
+            // CASE E: other names are considered joystick profiles
             JoystickMapping* JoystickProfile = Gamepads.GetJoystickProfile( ProfileName );
             
             if( JoystickProfile )
@@ -581,6 +589,17 @@ void LoadSettings( const string& FilePath )
         {
             bool AutoCards = GetRequiredYesNoAttribute( MemCardElement, "automatic" );
             Emulator.SetCardHandling( AutoCards );
+        }
+        
+        // read v32mouse speed (optional)
+        XMLElement* V32MouseElement = SettingsRoot->FirstChildElement( V32MOUSE_PROFILE_NAME );
+        Gamepads.V32MouseCountsPerStep = V32Mouse::DefaultCountsPerStep;
+        
+        if( V32MouseElement )
+        {
+            int CountsPerStep = GetRequiredIntegerAttribute( V32MouseElement, "counts-per-step" );
+            Clamp( CountsPerStep, V32Mouse::MinCountsPerStep, V32Mouse::MaxCountsPerStep );
+            Gamepads.V32MouseCountsPerStep = CountsPerStep;
         }
         
         // save current savestate slot (optional)
@@ -722,6 +741,9 @@ void SaveSettings( const string& FilePath )
             else if( MappedDevice.Type == DeviceTypes::V32Kbd )
               ProfileName = V32KBD_PROFILE_NAME;
             
+            else if( MappedDevice.Type == DeviceTypes::V32Mouse )
+              ProfileName = V32MOUSE_PROFILE_NAME;
+            
             else  // it is a joystick
             {
                 // obtain the applicable joystick profile
@@ -740,6 +762,11 @@ void SaveSettings( const string& FilePath )
         XMLElement* MemCardElement = CreatedDoc.NewElement( "memory-card" );
         SettingsRoot->LinkEndChild( MemCardElement );
         MemCardElement->SetAttribute( "automatic", Emulator.IsCardHandlingAuto()? "yes" : "no" );
+        
+        // save v32mouse speed
+        XMLElement* V32MouseElement = CreatedDoc.NewElement( V32MOUSE_PROFILE_NAME );
+        SettingsRoot->LinkEndChild( V32MouseElement );
+        V32MouseElement->SetAttribute( "counts-per-step", Gamepads.V32MouseCountsPerStep );
         
         // save current savestate slot
         XMLElement* SavestatesElement = CreatedDoc.NewElement( "savestates" );
