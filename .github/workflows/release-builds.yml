@@ -208,6 +208,12 @@ jobs:
             # (MSYSTEM_PREFIX is /ucrt64, an MSYS path the native linker cannot
             # open: give it the Windows form, D:/a/_temp/msys64/ucrt64)
             PREFIX=$(cygpath -m "$MSYSTEM_PREFIX")
+            ls -l "$PREFIX/lib/libpng.a" "$PREFIX/lib/libz.a"
+            # g++ appends its own -lwinpthread after our flags, in dynamic mode,
+            # so libwinpthread-1.dll would still be imported. With the import
+            # libraries removed the linker can only take the static archive.
+            rm -f "$PREFIX/lib/libwinpthread.dll.a" "$PREFIX/lib/libpthread.dll.a"
+            ls -l "$PREFIX/lib/libwinpthread.a"
             EXTRA=(
               "-DPNG_LIBRARY=$PREFIX/lib/libpng.a"
               "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++"
@@ -239,10 +245,16 @@ jobs:
       - name: Build (macOS)
         if: matrix.os == 'macos'
         run: |
+          BREW="$(brew --prefix)"
+          ls -l "$BREW/include/png.h" "$BREW/include/SDL2/SDL.h"
+          # CPATH is searched by clang for every compile, whatever flags the
+          # project's CMakeLists sets
+          export CPATH="$BREW/include"
+          export LIBRARY_PATH="$BREW/lib"
           cmake -S "${{ env.SOURCE_DIR }}" -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/include" \
+            -DCMAKE_PREFIX_PATH="$BREW" \
+            -DCMAKE_CXX_FLAGS="-I$BREW/include" \
             -DEMULATOR_BINARY_NAME="${{ env.PROJECT_NAME }}" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build build -j "$(sysctl -n hw.ncpu)"
