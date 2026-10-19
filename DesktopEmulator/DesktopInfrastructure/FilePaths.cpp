@@ -8,6 +8,15 @@
     #include <algorithm>        // [ C++ STL ] Algorithms
     #include <sys/stat.h>       // [ ANSI C ] File status
     
+    // these includes are only for directory listings
+    #if defined(WINDOWS_OS)
+      #define WIN32_LEAN_AND_MEAN
+      #define NOMINMAX
+      #include <windows.h>      // [ WinAPI ] Windows API
+    #else
+      #include <dirent.h>       // [ POSIX ] Directory entries
+    #endif
+    
     // these includes are only for unicode conversions
     #if defined(WINDOWS_OS)
       #include <locale>         // [ C++ STL ] Locales
@@ -169,6 +178,82 @@ bool DirectoryExists( const string& Path )
       return (Info.st_mode & S_IFDIR);
       
     #endif
+}
+
+// -----------------------------------------------------------------------------
+
+// auxiliary function for the directory listing: lowercase copy of a string
+static string ToLowerCase( string Text )
+{
+    for( char& Character: Text )
+      if( Character >= 'A' && Character <= 'Z' )
+        Character += ('a' - 'A');
+    
+    return Text;
+}
+
+// -----------------------------------------------------------------------------
+
+vector< string > ListFilesWithExtension( const string& Directory, const string& Extension )
+{
+    vector< string > FileNames;
+    string WantedExtension = ToLowerCase( Extension );
+    
+    // make sure that we can append file names to the directory
+    string DirectoryWithSlash = Directory;
+    
+    if( DirectoryWithSlash.empty() || DirectoryWithSlash.back() != PathSeparator )
+      DirectoryWithSlash += PathSeparator;
+    
+    #if defined(WINDOWS_OS)
+    
+      WIN32_FIND_DATAW FoundData;
+      wstring SearchPattern = ToUTF16( DirectoryWithSlash + "*" );
+      HANDLE SearchHandle = FindFirstFileW( SearchPattern.c_str(), &FoundData );
+      
+      if( SearchHandle == INVALID_HANDLE_VALUE )
+        return FileNames;
+      
+      do
+      {
+          // skip folders
+          if( FoundData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
+            continue;
+          
+          string FileName = ToUTF8( FoundData.cFileName );
+          
+          if( ToLowerCase( GetFileExtension( FileName ) ) == WantedExtension )
+            FileNames.push_back( FileName );
+      }
+      while( FindNextFileW( SearchHandle, &FoundData ) );
+      
+      FindClose( SearchHandle );
+      
+    #else
+      
+      DIR* DirectoryHandle = opendir( DirectoryWithSlash.c_str() );
+      
+      if( !DirectoryHandle )
+        return FileNames;
+      
+      while( dirent* Entry = readdir( DirectoryHandle ) )
+      {
+          string FileName = Entry->d_name;
+          
+          // skip folders (this also drops "." and "..")
+          if( !FileExists( DirectoryWithSlash + FileName ) )
+            continue;
+          
+          if( ToLowerCase( GetFileExtension( FileName ) ) == WantedExtension )
+            FileNames.push_back( FileName );
+      }
+      
+      closedir( DirectoryHandle );
+      
+    #endif
+    
+    sort( FileNames.begin(), FileNames.end() );
+    return FileNames;
 }
 
 

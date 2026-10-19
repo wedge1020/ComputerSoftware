@@ -131,6 +131,13 @@ bool EmulatorControl::IsCardHandlingAuto()
 
 void EmulatorControl::SetPower( bool On )
 {
+    // without a BIOS there is nothing for the console to boot
+    if( On && !Console.HasBios() )
+    {
+        LOG( "Cannot turn on the console: no BIOS is loaded" );
+        return;
+    }
+    
     Video.RenderToFramebuffer();
     Console.SetPower( On );
 
