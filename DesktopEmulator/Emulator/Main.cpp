@@ -17,6 +17,7 @@
     #include "Languages.hpp"
     #include "StopWatch.hpp"
     #include "Texture.hpp"
+    #include "Tracing.hpp"
     
     // include C/C++ headers
     #include <iostream>         // [ C++ STL ] I/O Streams
@@ -403,6 +404,12 @@ int main( int NumberOfArguments, char* Arguments[] )
                     // Key F4 loads state from the current slot
                     if( Key == SDLK_F4 ) GUI_LoadState();
                     
+                    // Key F7 starts / stops recording a profiling trace
+                    if( Key == SDLK_F7 ) Trace_RequestToggle();
+                    
+                    // Key F8 adds a marker to the trace being recorded
+                    if( Key == SDLK_F8 ) Trace_RequestMarker();
+                    
                     // when CTRL is pressed, process keyboard shortcuts
                     bool ControlIsPressed = (SDL_GetModState() & KMOD_CTRL);
                     
@@ -487,6 +494,9 @@ int main( int NumberOfArguments, char* Arguments[] )
             // redirect all rendering to emulator's display
             Video.RenderToFramebuffer();
             Video.BeginFrame();
+            
+            // serve requests to start / stop / mark a profiling trace
+            Trace_ProcessRequests();
             
             // measure cycle time
             double TimeStep = Watch.GetStepTime();

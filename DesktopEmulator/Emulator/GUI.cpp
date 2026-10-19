@@ -17,6 +17,7 @@
     #include "Globals.hpp"
     #include "Settings.hpp"
     #include "Languages.hpp"
+    #include "Tracing.hpp"
     
     // include C/C++ headers
     #include <time.h>               // [ ANSI C ] Time and date
@@ -826,6 +827,15 @@ void ProcessMenuConsole()
         ImGui::EndMenu();
     }
 
+    ImGui::Separator();
+    
+    // profiling trace (a request: it is served outside GUI processing)
+    if( ImGui::MenuItem( Texts(TextIDs::Console_RecordTrace), nullptr, Console.Trace.Armed, true ) )
+      Trace_RequestToggle();
+    
+    if( ImGui::MenuItem( Texts(TextIDs::Console_TraceMarker), nullptr, false, Console.Trace.Recording ) )
+      Trace_RequestMarker();
+    
     ImGui::Separator();
     
     if( ImGui::MenuItem( Texts(TextIDs::Console_Quit) ) )

@@ -56,6 +56,9 @@ namespace V32
         // connect main RAM
         RAM.Connect( Constants::RAMSize );
         
+        // the (optional) profiling recorder observes this console
+        Trace.Attach( this );
+        
         // set initial state
         PowerIsOn = false;
         
@@ -100,6 +103,7 @@ namespace V32
         else
         {
             Callbacks::LogLine( "Console power OFF" );
+            Trace.EndSession( "console powered off" );
             SPU.StopAllChannels();
         }
     }
@@ -109,6 +113,7 @@ namespace V32
     void V32Console::Reset()
     {
         Callbacks::LogLine( "Console reset" );
+        Trace.EndSession( "console reset" );
         
         // first: transmit the message to all components that need it
         Timer.Reset();
@@ -124,6 +129,10 @@ namespace V32
         // loads become 0 on a reset
         LastCPULoads[ 0 ] = LastCPULoads[ 1 ] = 0;
         LastGPULoads[ 0 ] = LastGPULoads[ 1 ] = 0;
+        
+        // a new run begins: record it when the player asked for traces
+        if( Trace.Armed )
+          Trace.BeginSession( *this );
     }
     
     // -----------------------------------------------------------------------------
@@ -141,6 +150,9 @@ namespace V32
         GPU.ChangeFrame();
         SPU.ChangeFrame();
         GamepadController.ChangeFrame();
+        
+        // (optional) the profiling recorder notes the gamepad state of this frame
+        Trace.BeginFrame();
         
         // STEP 2: Run a frame's worth of cycles
         try
@@ -170,6 +182,9 @@ namespace V32
         int GPUUsedPixels = Constants::GPUPixelCapacityPerFrame - max( 0, GPU.RemainingPixels );
         LastGPULoads[ 1 ] = LastGPULoads[ 0 ];
         LastGPULoads[ 0 ] = 100.0 * GPUUsedPixels / Constants::GPUPixelCapacityPerFrame;
+        
+        // (optional) the profiling recorder closes the frame
+        Trace.EndFrame();
         
         // STEP 3: save memory card to file when modified
         if( MemoryCardController.PendingSave )
@@ -665,6 +680,7 @@ namespace V32
         
         // save the file name
         CartridgeController.CartridgeFileName = GetPathFileName( FilePath );
+        Trace.CartridgePath = FilePath;
         Callbacks::LogLine( "FilePath = \"" + FilePath );
         Callbacks::LogLine( "CartridgeFileName = \"" + CartridgeController.CartridgeFileName );
         Callbacks::LogLine( "Finished loading cartridge" );

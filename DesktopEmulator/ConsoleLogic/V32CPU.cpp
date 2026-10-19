@@ -5,6 +5,7 @@
     
     // include console logic headers
     #include "V32CPU.hpp"
+    #include "V32Trace.hpp"
     #include "ExternalInterfaces.hpp"
     
     // include C/C++ headers
@@ -121,6 +122,7 @@ namespace V32
     {
         MemoryBus = nullptr;
         ControlBus = nullptr;
+        Tracer = nullptr;
     }
     
     // -----------------------------------------------------------------------------
@@ -164,6 +166,10 @@ namespace V32
         if( Instruction.UsesImmediate )
           MemoryBus->ReadAddress( InstructionPointer.AsInteger++, ImmediateValue );
         
+        // let the profiling recorder see it (only while recording)
+        if( Tracer )
+          Tracer->OnInstruction( InstructionPointer.AsBinary - (Instruction.UsesImmediate? 2 : 1), Instruction.UsesImmediate );
+        
         // run the instruction
         // (redirect to the needed specific processor)
         int32_t OpCode = Instruction.OpCode;
@@ -178,6 +184,10 @@ namespace V32
     
     void V32CPU::RaiseHardwareError( CPUErrorCodes Code )
     {
+        // let the profiling recorder know before registers are overwritten
+        if( Tracer )
+          Tracer->OnCPUError( (uint32_t)Code, InstructionPointer.AsBinary - (Instruction.UsesImmediate? 2 : 1) );
+        
         // use registers to pass values
         // (don't use stack, since it may fail)
         Registers[ 0 ].AsInteger = (int32_t)Code;
