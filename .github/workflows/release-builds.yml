@@ -205,10 +205,13 @@ jobs:
             # the binary-only package must not need any DLL but SDL2.dll,
             # and must not load the regular emulator's (msvcrt) libpng/zlib
             # with this build's (UCRT) C runtime. Checked below.
+            # (MSYSTEM_PREFIX is /ucrt64, an MSYS path the native linker cannot
+            # open: give it the Windows form, D:/a/_temp/msys64/ucrt64)
+            PREFIX=$(cygpath -m "$MSYSTEM_PREFIX")
             EXTRA=(
-              "-DPNG_LIBRARY=$MSYSTEM_PREFIX/lib/libpng.a"
+              "-DPNG_LIBRARY=$PREFIX/lib/libpng.a"
               "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++"
-              "-DCMAKE_CXX_STANDARD_LIBRARIES=-Wl,-Bstatic -lwinpthread $MSYSTEM_PREFIX/lib/libz.a -Wl,-Bdynamic"
+              "-DCMAKE_CXX_STANDARD_LIBRARIES=-Wl,-Bstatic -lwinpthread $PREFIX/lib/libz.a -Wl,-Bdynamic"
             )
           else
             export CC=clang CXX=clang++
@@ -230,12 +233,16 @@ jobs:
           cmake --build build
           strip build/${{ env.PROJECT_NAME }} build/EditControls
 
+      # The emulator's CMake finds libpng's library but not its header, so
+      # Homebrew's include folder (/opt/homebrew/include, not searched by
+      # default) is added by hand.
       - name: Build (macOS)
         if: matrix.os == 'macos'
         run: |
           cmake -S "${{ env.SOURCE_DIR }}" -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+            -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/include" \
             -DEMULATOR_BINARY_NAME="${{ env.PROJECT_NAME }}" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build build -j "$(sysctl -n hw.ncpu)"
