@@ -1171,6 +1171,7 @@ namespace V32
     void V32Trace::WriteReport( const char* Reason )
     {
         WritePending = false;
+        LastReportPath = "";
 
         string Path = OutputFolder + BaseName + ".trace.txt";
         string BlocksPath = OutputFolder + BaseName + ".blocks.txt";

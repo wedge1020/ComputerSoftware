@@ -75,6 +75,7 @@ enum class TextIDs: int
     Dialogs_ScreenshotSaved_Label,
     Dialogs_TraceOn_Label,
     Dialogs_TraceSaved_Label,
+    Dialogs_TraceFolderError_Label,
     Dialogs_About_Title,
     Dialogs_About_Label,
     Dialogs_Guide_Title,

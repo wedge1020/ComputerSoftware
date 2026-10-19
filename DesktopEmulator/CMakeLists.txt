@@ -31,7 +31,7 @@ set(PROJECT_VERSION_MINOR 2)
 set(PROJECT_VERSION_PATCH 18)
 
 # Set names for final executables
-set(EMULATOR_BINARY_NAME "Vircon32")
+set(EMULATOR_BINARY_NAME "Vircon32" CACHE STRING "Name of the emulator executable")
 set(EDITCONTROLS_BINARY_NAME "EditControls")
 
 # -----------------------------------------------------

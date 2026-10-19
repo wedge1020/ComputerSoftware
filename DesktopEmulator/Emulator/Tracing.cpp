@@ -94,6 +94,18 @@ void Trace_ProcessRequests()
             // from now on, every run of a cartridge is recorded
             // (and one that is already running, from this moment)
             EnsureTracesFolder();
+            
+            if( !DirectoryExists( GetTracesFolder() ) )
+            {
+                DelayedMessageBox
+                (
+                    SDL_MESSAGEBOX_ERROR,
+                    "Error",
+                    (Texts( TextIDs::Dialogs_TraceFolderError_Label ) + GetTracesFolder()).c_str()
+                );
+                return;
+            }
+            
             Console.Trace.OutputFolder = GetTracesFolder();
             Console.Trace.Arm( true );
             LOG( "Trace recording ON, reports go to " + Console.Trace.OutputFolder );
@@ -117,6 +129,13 @@ void Trace_ProcessRequests()
                   SDL_MESSAGEBOX_INFORMATION,
                   Texts( TextIDs::Dialogs_Done ),
                   (Texts( TextIDs::Dialogs_TraceSaved_Label ) + Console.Trace.LastReportPath).c_str()
+              );
+            else
+              DelayedMessageBox
+              (
+                  SDL_MESSAGEBOX_ERROR,
+                  "Error",
+                  (Texts( TextIDs::Dialogs_TraceFolderError_Label ) + Console.Trace.OutputFolder).c_str()
               );
         }
     }
