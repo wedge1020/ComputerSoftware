@@ -10,7 +10,8 @@
     
     // include C/C++ headers
     #include <cstring>          // [ ANSI C ] Strings
-    
+    #include <cstdlib>          // [ ANSI C ] General utilities
+
     // declare used namespaces
     using namespace std;
 // *****************************************************************************
@@ -134,6 +135,10 @@ namespace V32
         if( !PowerIsOn )
           return;
         
+        // STEP 0: take in any changes made by an external
+        // process to the host-owned area of the card mailbox
+        SyncMemoryCardMailbox();
+
         // STEP 1: Begin a new frame by sending
         // a frame change message to components
         Timer.ChangeFrame();
@@ -793,9 +798,46 @@ namespace V32
         // do NOT close the file! leave it open until
         // card is unloaded or emulation is stopped,
         // so that it can be saved if card is modified
-        
+
         // save the file name
         MemoryCardController.CardFileName = GetPathFileName( FilePath );
+
+        // nothing is modified yet in the freshly loaded card
+        MemoryCardController.ClearDirtyPages();
+
+        // a card formatted as a v32dev mailbox gets synchronized with its file
+        // (setting environment variable V32DEV_DISABLE to any value other than
+        // 0 keeps the card working as a regular memory card)
+        MemoryCardController.MailboxActive = false;
+        MemoryCardController.Heartbeat = 0;
+        const char* DisableSetting = getenv( "V32DEV_DISABLE" );
+        bool MailboxDisabled = (DisableSetting != nullptr && strcmp( DisableSetting, "0" ) != 0);
+
+        if( !MailboxDisabled && MemoryCardController.HeaderIsValid() )
+        {
+            // the host area is read through a separate and unbuffered handle,
+            // so that every read gets the current file contents
+            ifstream& PollFile = MemoryCardController.PollFile;
+            PollFile.rdbuf()->pubsetbuf( nullptr, 0 );
+            OpenInputFile( PollFile, FilePath, ios_base::in | ios_base::binary );
+
+            if( PollFile.fail() )
+            {
+                PollFile.clear();
+                Callbacks::LogLine( "v32dev: cannot open card file for polling, mailbox disabled" );
+            }
+            else
+            {
+                MemoryCardController.MailboxActive = true;
+
+                // tell programs that this emulator keeps the mailbox live
+                // (this word is for the emulator only, it is never saved to the file)
+                MemoryCardController.Memory[ DEV::RegionStart + DEV::H_EmulatorFlags ].AsInteger = DEV::EmuFlagLive;
+                MemoryCardController.Memory[ DEV::RegionStart + DEV::H_EmulatorBeat  ].AsInteger = 0;
+                Callbacks::LogLine( "v32dev: mailbox active" );
+            }
+        }
+
         Callbacks::LogLine( "Finished loading memory card" );
     }
     
@@ -813,9 +855,16 @@ namespace V32
         
         // remove the card memory
         MemoryCardController.Disconnect();
-        
-        // close the open file
+
+        // close the open files
         MemoryCardController.LinkedFile.close();
+
+        if( MemoryCardController.PollFile.is_open() )
+          MemoryCardController.PollFile.close();
+
+        MemoryCardController.PollFile.clear();
+        MemoryCardController.MailboxActive = false;
+        MemoryCardController.ClearDirtyPages();
         Callbacks::LogLine( "Finished unloading memory card" );
     }
     
@@ -832,13 +881,77 @@ namespace V32
         if( !OutputFile.is_open() || OutputFile.fail() )
           Callbacks::ThrowException( "Cannot save memory card file" );
         
-        // save the signature
-        OutputFile.seekp( ios_base::beg );
-        WriteSignature( OutputFile, MemoryCardFileFormat::Signature );
-        
-        // now save all contents
-        OutputFile.write( (char*)(&MemoryCardController.Memory[ 0 ]), Constants::MemoryCardSize * 4 );
+        // only the modified parts of the card are written. The file keeps its
+        // 8-byte signature header, so card word N is at file byte 8 + 4 * N
+        vector< DEV::SaveSegment > Segments;
+        MemoryCardController.PlanSave( Segments );
+
+        // a first phase writes data and a second one the words that publish it
+        // (a mailbox has no second phase segments when it is not active)
+        for( int Phase = 1; Phase <= 2; Phase++ )
+        {
+            bool WroteAnything = false;
+
+            for( size_t i = 0; i < Segments.size(); i++ )
+            {
+                if( Segments[ i ].Phase != Phase )
+                  continue;
+
+                OutputFile.clear();
+                OutputFile.seekp( 8 + (std::streamoff)Segments[ i ].FirstWord * 4, ios_base::beg );
+                OutputFile.write( (char*)(&MemoryCardController.Memory[ Segments[ i ].FirstWord ]), Segments[ i ].NumberOfWords * 4 );
+                WroteAnything = true;
+            }
+
+            // make the data reach the file (and other processes) before the next phase
+            if( WroteAnything )
+              OutputFile.flush();
+        }
+
+        if( OutputFile.fail() )
+          Callbacks::ThrowException( "Cannot save memory card file" );
+
+        MemoryCardController.ClearDirtyPages();
         MemoryCardController.PendingSave = false;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    // Called at the start of every frame. When the card is formatted as a
+    // v32dev mailbox, takes into the card memory any changes that an external
+    // process has made to the host-owned area of its file. This happens between
+    // frames, so programs always see a consistent state during a frame.
+    void V32Console::SyncMemoryCardMailbox()
+    {
+        if( !MemoryCardController.MailboxActive )
+          return;
+
+        // heartbeat: it lets programs know that the mailbox is being kept live
+        // (this changes the card memory directly, so it is not saved to the file)
+        MemoryCardController.Heartbeat++;
+        MemoryCardController.Memory[ DEV::RegionStart + DEV::H_EmulatorBeat ].AsInteger = (int32_t)MemoryCardController.Heartbeat;
+
+        // read the whole host-owned area from the file
+        ifstream& PollFile = MemoryCardController.PollFile;
+        vector< V32Word >& Buffer = MemoryCardController.PollBuffer;
+        Buffer.resize( DEV::HostAreaWords );
+
+        PollFile.clear();
+        PollFile.seekg( 8 + (std::streamoff)DEV::HostAreaStart * 4, ios_base::beg );
+        PollFile.read( (char*)(&Buffer[ 0 ]), DEV::HostAreaWords * 4 );
+
+        // on a failed or short read just try again on the next frame
+        if( PollFile.fail() || PollFile.gcount() != (std::streamsize)DEV::HostAreaWords * 4 )
+        {
+            PollFile.clear();
+            return;
+        }
+
+        // take the changes, but not as program writes: they must not be saved back
+        V32Word* HostArea = &MemoryCardController.Memory[ DEV::HostAreaStart ];
+
+        if( memcmp( HostArea, &Buffer[ 0 ], DEV::HostAreaWords * 4 ) != 0 )
+          memcpy( HostArea, &Buffer[ 0 ], DEV::HostAreaWords * 4 );
     }
     
     // -----------------------------------------------------------------------------
@@ -853,6 +966,13 @@ namespace V32
     bool V32Console::WasMemoryCardModified()
     {
         return MemoryCardController.PendingSave;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    bool V32Console::HasMemoryCardMailbox()
+    {
+        return MemoryCardController.MailboxActive;
     }
     
     // -----------------------------------------------------------------------------
