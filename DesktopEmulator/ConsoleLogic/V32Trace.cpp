@@ -153,6 +153,7 @@ namespace V32
         HitsDropped = 0;
         ResumeGaveUp = false;
         Restarts = 0;
+        RestartFrames.clear();
         RepeatRun = 0;
         ContinueAfterTrap = true;
         HaveResume = false;
@@ -192,6 +193,7 @@ namespace V32
         HeldFrames = 0;
         ResumeGaveUp = false;
         Restarts = 0;
+        RestartFrames.clear();
         RepeatRun = 0;
         LastTrapKey = "";
         WatchSpecs.clear();
@@ -524,6 +526,7 @@ namespace V32
         H.IsEvent = !IsTrap;
         H.Name = Name;
         H.CartFrame = CurrentCartFrame();
+        H.SegmentStart = RestartFrames.empty()? 0 : RestartFrames.back();
         H.Count = 1;
 
         LiveRegisters( H.Regs );
@@ -629,6 +632,7 @@ namespace V32
         RingFrozen = false;
         HavePrevious = false;
         Restarts++;
+        RestartFrames.push_back( CurrentCartFrame() );
         AddEvent( Format( "cartridge restarted after the trap (restart %u)", (unsigned)Restarts ) );
         WritePending = true;
     }
@@ -1018,7 +1022,12 @@ namespace V32
             }
 
             string Trail = DescribeTrail( H, 32, "," );
-            Out += " trail=" + (Trail.empty()? string("-") : Trail) + "\n";
+            Out += " trail=" + (Trail.empty()? string("-") : Trail);
+
+            // how to get here again: the gamepad history since the last (re)start of the cartridge up to the hit, relative to that
+            // start.  A translator-side script feeds it to its profiler (spec 2.1: segstart, input)
+            Out += Format( " segstart=%d", H.SegmentStart );
+            Out += " input=" + BuildInputRange( H.SegmentStart, H.CartFrame + 1 ) + "\n";
         }
 
         return Out;
@@ -1380,6 +1389,17 @@ namespace V32
     string V32Trace::BuildInputScript( int32_t& CartFrames ) const
     {
         CartFrames = (CartFrame0 < 0)? 0 : (int32_t)Frames.size() - CartFrame0;
+        return BuildInputRange( 0, CartFrames );
+    }
+
+    // the same for cartridge frames [From, To), numbered from From
+    string V32Trace::BuildInputRange( int32_t From, int32_t To ) const
+    {
+        int32_t CartFrames = (CartFrame0 < 0)? 0 : (int32_t)Frames.size() - CartFrame0;
+        if( To > CartFrames ) To = CartFrames;
+        if( From < 0 ) From = 0;
+        if( To < From ) To = From;
+        const int32_t Length = To - From;
 
         // runs of each button
         struct Run { int32_t From, To; };
@@ -1392,9 +1412,9 @@ namespace V32
 
             int32_t RunStart = -1;
 
-            for( int32_t Frame = 0; Frame <= CartFrames; Frame++ )
+            for( int32_t Frame = 0; Frame <= Length; Frame++ )
             {
-                bool Held = (Frame < CartFrames) && (Frames[ CartFrame0 + Frame ].Pad & (1 << Button));
+                bool Held = (Frame < Length) && (Frames[ CartFrame0 + From + Frame ].Pad & (1 << Button));
 
                 if( Held && RunStart < 0 )
                   RunStart = Frame;
@@ -1548,6 +1568,14 @@ namespace V32
         // input history
         Out += "\n[input]\n";
         Out += Format( "# gamepad 1, cart frames 0-%d. Replay with: V32_INPUT=@this_file v32sim cart.v32 %d\n", max( 0, CartFrames - 1 ), CartFrames );
+        if( !RestartFrames.empty() )
+        {
+            // the cartridge started over at these cart frames: the script above is one timeline across them, the traps file has one script per trap
+            Out += "# restarts at cart frames:";
+            for( size_t i = 0; i < RestartFrames.size(); i++ )
+              Out += Format( " %d", RestartFrames[ i ] );
+            Out += "\n";
+        }
         Out += "V32_INPUT=" + InputScript + "\n";
 
         // performance

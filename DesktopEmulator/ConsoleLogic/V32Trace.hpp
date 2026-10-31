@@ -124,6 +124,7 @@ namespace V32
                 std::string Key;                // what makes two hits the same
                 std::string Kind;               // name of the trap kind (meta `kinds`), or ""
                 int32_t CartFrame;              // first occurrence
+                int32_t SegmentStart;           // cart frame of the last (re)start of the cartridge when it happened (0 = never restarted)
                 uint32_t Count;
                 uint32_t Regs[ 16 ];
                 std::vector< std::vector< uint32_t > > Values;      // per capture
@@ -136,6 +137,7 @@ namespace V32
             int32_t HeldFrames;                 // frames spent in the current trap
             bool ResumeGaveUp;                  // the same trap came back three times in a row: stop restarting
             uint32_t Restarts;
+            std::vector< int32_t > RestartFrames;   // cart frame of each restart
             std::string LastTrapKey;
             int RepeatRun;
 
@@ -319,6 +321,7 @@ namespace V32
             void AppendProfile( std::string& Out, const std::vector< uint64_t >& ByLabel,
                                 int32_t FirstFrame, int32_t LastFrame, int TopCount ) const;
             std::string BuildInputScript( int32_t& CartFrames ) const;
+            std::string BuildInputRange( int32_t From, int32_t To ) const;
             std::string BuildReport( const char* Reason ) const;
             std::string BuildBlockList() const;
             void WriteReport( const char* Reason );

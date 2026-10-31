@@ -36,6 +36,12 @@
 static bool ToggleRequested = false;
 static bool MarkerRequested = false;
 
+// this build is meant for testing: recording starts with the emulator, a trap does not restart the cartridge (the menu
+// items still switch both), and each of the two information boxes is shown at most once per emulator session
+static bool AutoStarted = false;
+static bool OnBoxShown = false;
+static bool SavedBoxShown = false;
+
 
 // =============================================================================
 //      FOLDER FOR THE REPORTS
@@ -85,6 +91,16 @@ void Trace_RequestMarker()
 
 void Trace_ProcessRequests()
 {
+    if( !AutoStarted )
+    {
+        AutoStarted = true;
+        EnsureTracesFolder();
+        Console.Trace.OutputFolder = GetTracesFolder();
+        Console.Trace.ContinueAfterTrap = false;
+        Console.Trace.Arm( true );
+        LOG( "Trace recording ON (at start), reports go to " + Console.Trace.OutputFolder );
+    }
+    
     if( ToggleRequested )
     {
         ToggleRequested = false;
@@ -98,12 +114,16 @@ void Trace_ProcessRequests()
             Console.Trace.Arm( true );
             LOG( "Trace recording ON, reports go to " + Console.Trace.OutputFolder );
             
-            DelayedMessageBox
-            (
-                SDL_MESSAGEBOX_INFORMATION,
-                Texts( TextIDs::Dialogs_Done ),
-                (Texts( TextIDs::Dialogs_TraceOn_Label ) + Console.Trace.OutputFolder).c_str()
-            );
+            if( !OnBoxShown )
+            {
+                OnBoxShown = true;
+                DelayedMessageBox
+                (
+                    SDL_MESSAGEBOX_INFORMATION,
+                    Texts( TextIDs::Dialogs_Done ),
+                    (Texts( TextIDs::Dialogs_TraceOn_Label ) + Console.Trace.OutputFolder).c_str()
+                );
+            }
         }
         else
         {
@@ -111,13 +131,16 @@ void Trace_ProcessRequests()
             Console.Trace.Arm( false );
             LOG( "Trace recording OFF, last report: " + Console.Trace.LastReportPath );
             
-            if( !Console.Trace.LastReportPath.empty() )
+            if( !Console.Trace.LastReportPath.empty() && !SavedBoxShown )
+            {
+              SavedBoxShown = true;
               DelayedMessageBox
               (
                   SDL_MESSAGEBOX_INFORMATION,
                   Texts( TextIDs::Dialogs_Done ),
                   (Texts( TextIDs::Dialogs_TraceSaved_Label ) + Console.Trace.LastReportPath).c_str()
               );
+            }
         }
     }
     
