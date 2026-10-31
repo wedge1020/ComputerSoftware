@@ -1,6 +1,7 @@
 // *****************************************************************************
     // include console logic headers
-    #include "ConsoleLogic/V32Console.hpp"
+    #include <chrono>
+#include "ConsoleLogic/V32Console.hpp"
     
     // include infrastructure headers
     #include "DesktopInfrastructure/Logger.hpp"
@@ -17,6 +18,7 @@
     #include "Languages.hpp"
     #include "StopWatch.hpp"
     #include "Texture.hpp"
+    #include "Tracing.hpp"
     
     // include C/C++ headers
     #include <iostream>         // [ C++ STL ] I/O Streams
@@ -403,6 +405,12 @@ int main( int NumberOfArguments, char* Arguments[] )
                     // Key F4 loads state from the current slot
                     if( Key == SDLK_F4 ) GUI_LoadState();
                     
+                    // Key F7 starts / stops recording a profiling trace
+                    if( Key == SDLK_F7 ) Trace_RequestToggle();
+                    
+                    // Key F8 adds a marker to the trace being recorded
+                    if( Key == SDLK_F8 ) Trace_RequestMarker();
+                    
                     // when CTRL is pressed, process keyboard shortcuts
                     bool ControlIsPressed = (SDL_GetModState() & KMOD_CTRL);
                     
@@ -488,6 +496,9 @@ int main( int NumberOfArguments, char* Arguments[] )
             Video.RenderToFramebuffer();
             Video.BeginFrame();
             
+            // serve requests to start / stop / mark a profiling trace
+            Trace_ProcessRequests();
+            
             // measure cycle time
             double TimeStep = Watch.GetStepTime();
             
@@ -497,10 +508,16 @@ int main( int NumberOfArguments, char* Arguments[] )
                 PendingFrames += TimeStep * 60.0;
                 if( PendingFrames < 0.9 ) continue;
                 
+                int FramesInBurst = 0;
+                
                 while( PendingFrames >= 0.9 )
                 {
-                    // run another frame
+                    // run another frame (the trace recorder, when on, notes how long it took)
+                    auto FrameStart = std::chrono::steady_clock::now();
                     Emulator.RunNextFrame();
+                    auto FrameUs = std::chrono::duration_cast< std::chrono::microseconds >( std::chrono::steady_clock::now() - FrameStart ).count();
+                    Console.Trace.HostFrame( (uint32_t)FrameUs, FramesInBurst > 0 );
+                    FramesInBurst++;
                     PendingFrames -= 1;
                 }
             }

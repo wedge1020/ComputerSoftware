@@ -154,6 +154,54 @@ namespace V32
     {
         // restore the drawing capacity for next frame
         RemainingPixels = Constants::GPUPixelCapacityPerFrame;
+
+        // the video queue is always emptied at the end of a frame
+        StatQuads = 0;
+        StatFlushes = 0;
+        StatPending = 0;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    void V32GPU::StatChange( int Kind, uint32_t Value )
+    {
+        uint32_t& Current = (Kind == 0)? *(uint32_t*)&StatTexture : (Kind == 1)? StatColor : *(uint32_t*)&StatBlend;
+
+        if( Current == Value )
+          return;
+
+        Current = Value;
+
+        if( StatPending > 0 )
+        {
+            StatFlushes++;
+            StatPending = 0;
+        }
+    }
+
+    // -----------------------------------------------------------------------------
+
+    void V32GPU::StatQuad()
+    {
+        StatQuads++;
+        StatPending++;
+
+        if( StatPending >= 20 )
+        {
+            StatFlushes++;
+            StatPending = 0;
+        }
+    }
+
+    // -----------------------------------------------------------------------------
+
+    void V32GPU::StatClear()
+    {
+        if( StatPending > 0 )
+        {
+            StatFlushes++;
+            StatPending = 0;
+        }
     }
     
     // -----------------------------------------------------------------------------
@@ -182,6 +230,10 @@ namespace V32
         Callbacks::SelectTexture( SelectedTexture );
         Callbacks::SetMultiplyColor( MultiplyColor );
         Callbacks::SetBlendingMode( ActiveBlending );
+        StatQuads = StatFlushes = StatPending = 0;
+        StatTexture = SelectedTexture;
+        { V32Word W; W.AsColor = MultiplyColor; StatColor = W.AsBinary; }
+        StatBlend = ActiveBlending;
         
         // reset pointed entities
         PointedTexture = &BiosTexture;
@@ -241,6 +293,7 @@ namespace V32
         }
         
         // clear the screen
+        StatClear();
         Callbacks::ClearScreen( ClearColor );
     }
     
@@ -420,6 +473,7 @@ namespace V32
         }
         
         // draw rectangle defined as a quad (4-vertex polygon)
+        StatQuad();
         Callbacks::DrawQuad( RegionQuad );
     }
 }

@@ -13,6 +13,9 @@
 
 namespace V32
 {
+    class V32Trace;
+    
+    
     // =============================================================================
     //      V32 CPU CLASS
     // =============================================================================
@@ -45,6 +48,9 @@ namespace V32
             // connections with the host Vircon system
             V32MemoryBus* MemoryBus;
             V32ControlBus* ControlBus;
+            
+            // optional profiling recorder (null unless a trace is recording)
+            V32Trace* Tracer;
             
         public:
             

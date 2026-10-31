@@ -12,6 +12,7 @@
     #include "V32Memory.hpp"
     #include "V32GamepadController.hpp"
     #include "V32CartridgeController.hpp"
+    #include "V32Trace.hpp"
     #include "V32MemoryCardController.hpp"
     #include "V32NullController.hpp"
     
@@ -49,6 +50,9 @@ namespace V32
             V32SPU SPU;
             V32RAM RAM;
             V32ROM BiosProgramROM;
+            
+            // optional profiling recorder (see V32Trace.hpp)
+            V32Trace Trace;
             
             // internal state
             bool PowerIsOn;

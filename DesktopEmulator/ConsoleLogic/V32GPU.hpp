@@ -110,6 +110,17 @@ namespace V32
             
             // quad coordinates for drawing regions
             GPUQuad RegionQuad;
+
+            // host cost model (only counts, changes nothing): how many quads were drawn this
+            // frame and how many batches the DesktopEmulator's video queue (20 quads) must send
+            // because of them. A batch ends when the queue is full or when the texture, multiply
+            // colour or blending mode really changes while quads are waiting.
+            uint32_t StatQuads;
+            uint32_t StatFlushes;
+            uint32_t StatPending;
+            int32_t  StatTexture;
+            uint32_t StatColor;
+            int32_t  StatBlend;
             
         public:
             
@@ -125,6 +136,11 @@ namespace V32
             virtual bool ReadPort( int32_t LocalPort, V32Word& Result );
             virtual bool WritePort( int32_t LocalPort, V32Word Value );
             
+            // host cost model (see the members above)
+            void StatChange( int Kind, uint32_t Value );    // 0 texture, 1 multiply colour, 2 blending
+            void StatQuad();
+            void StatClear();
+
             // general operation
             void ChangeFrame();
             void Reset();
