@@ -325,6 +325,7 @@ namespace V32
             std::string BuildReport( const char* Reason ) const;
             std::string BuildBlockList() const;
             void WriteReport( const char* Reason );
+            static void WriteLatest( const std::string& Path, const std::string& Text );
     };
 }
 

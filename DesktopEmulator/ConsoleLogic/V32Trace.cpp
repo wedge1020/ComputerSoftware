@@ -1751,12 +1751,29 @@ namespace V32
 
     // -----------------------------------------------------------------------------
 
+    void V32Trace::WriteLatest( const string& Path, const string& Text )
+    {
+        ofstream File;
+        OpenOutputFile( File, Path, ios::out | ios::binary | ios::trunc );
+
+        if( File.is_open() )
+          File << Text;
+        else
+          Callbacks::LogLine( "Trace: cannot write " + Path );
+    }
+
+    // -----------------------------------------------------------------------------
+
     void V32Trace::WriteReport( const char* Reason )
     {
         WritePending = false;
 
         string Path = OutputFolder + BaseName + ".trace.txt";
         string BlocksPath = OutputFolder + BaseName + ".blocks.txt";
+
+        // "<cart>_latest.*": a copy of the newest session under a name that never changes, overwritten by every session,
+        // so that scripts which only want the latest run can be pointed at this folder without looking for a date
+        string LatestBase = OutputFolder + SafeFileStem( CartName ) + "_latest";
 
         try
         {
@@ -1773,23 +1790,36 @@ namespace V32
             File << Report;
             File.close();
             LastReportPath = Path;
+            WriteLatest( LatestBase + ".trace.txt", Report );
 
             if( LabelsFromFile )
             {
+                string Blocks = BuildBlockList();
                 ofstream BlocksFile;
                 OpenOutputFile( BlocksFile, BlocksPath, ios::out | ios::binary );
 
                 if( BlocksFile.is_open() )
-                  BlocksFile << BuildBlockList();
+                  BlocksFile << Blocks;
+
+                WriteLatest( LatestBase + ".blocks.txt", Blocks );
             }
 
-            if( !Hits.empty() )
+            // a session without a trap still replaces the "latest" traps file (with just its header), so that an older
+            // session's traps are never mistaken for this one's
             {
-                ofstream TrapFile;
-                OpenOutputFile( TrapFile, OutputFolder + BaseName + ".traps.txt", ios::out | ios::binary );
+                string Traps = "# V32TRACE-traps 2 cart=" + CartName + " fnv1a=" + Format( "%08X", (unsigned)CartHash ) +
+                               " restarts=" + to_string( Restarts ) + "\n" + (Hits.empty()? string() : BuildTrapLines());
 
-                if( TrapFile.is_open() )
-                  TrapFile << "# V32TRACE-traps 2 cart=" << CartName << " fnv1a=" << Format( "%08X", (unsigned)CartHash ) << " restarts=" << Restarts << "\n" << BuildTrapLines();
+                if( !Hits.empty() )
+                {
+                    ofstream TrapFile;
+                    OpenOutputFile( TrapFile, OutputFolder + BaseName + ".traps.txt", ios::out | ios::binary );
+
+                    if( TrapFile.is_open() )
+                      TrapFile << Traps;
+                }
+
+                WriteLatest( LatestBase + ".traps.txt", Traps );
             }
 
             Callbacks::LogLine( "Trace written to " + Path );
