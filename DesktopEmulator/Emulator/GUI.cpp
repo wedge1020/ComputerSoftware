@@ -846,6 +846,8 @@ void GUI_SaveState()
 enum class DelayedFileActions
 {
     None,
+    DevChannelOpenStorage,
+    DevChannelNewStorage,
     UnloadCartridge,
     LoadCartridge,
     ChangeCartridge,
@@ -858,6 +860,70 @@ enum class DelayedFileActions
 
 DelayedFileActions PendingAction = DelayedFileActions::None;
 string PendingActionPath = "";
+int PendingDevChannel = 0;
+
+
+// =============================================================================
+//      V32DEV SERVER: FILES AND ERRORS
+// =============================================================================
+// The v32dev server built into the console (see ConsoleLogic/V32DevServer.hpp)
+// serves the 4 channels of the memory card mailbox. These are the actions that
+// its menu (in the Memory card menu) needs
+
+// options for the next storage file picked (they are part of what a channel serves)
+static bool DevStorageBytesMode = false;
+static bool DevStorageReadOnly = false;
+static string LastDevStorageDirectory;
+
+// size of the images created by the menu: 8 MiB, as 16384 sectors of 512 bytes
+static const int DevNewImageSectors = 16384;
+
+// the port of a channel's serial:tcp (in the settings file it can be any)
+static int DevTcpPort( int Channel )
+{
+    return 3200 + Channel;
+}
+
+static void DevServerError( const string& Message )
+{
+    DelayedMessageBox( SDL_MESSAGEBOX_ERROR, "v32dev", Message.c_str() );
+}
+
+static void GUI_SetDevChannel( int Channel, const string& Spec )
+{
+    string Error;
+
+    if( !Console.SetDevServerChannel( Channel, Spec, Error ) )
+      DevServerError( "Channel " + to_string( Channel ) + ": " + Error );
+}
+
+// asks for a file (no file type filter) and makes the channel serve it as storage
+static void GUI_DevChannelStorage( int Channel, bool CreateNew )
+{
+    if( LastDevStorageDirectory.empty() )
+      LastDevStorageDirectory = EmulatorFolder;
+
+    string Path = (CreateNew? GetSaveFilePath( nullptr, LastDevStorageDirectory ) : GetLoadFilePath( nullptr, LastDevStorageDirectory ));
+
+    if( Path.empty() )
+      return;
+
+    LastDevStorageDirectory = GetPathDirectory( Path );
+
+    // (an existing file is used as it is: it is only created when it is not there)
+    string Spec = "storage:" + Path;
+
+    if( DevStorageBytesMode )
+      Spec += ",bytes";
+
+    if( DevStorageReadOnly && !CreateNew )
+      Spec += ",ro";
+
+    if( CreateNew )
+      Spec += ",create=" + to_string( DevNewImageSectors );
+
+    GUI_SetDevChannel( Channel, Spec );
+}
 
 
 // =============================================================================
@@ -1012,6 +1078,125 @@ void ProcessMenuCartridge()
 
 // -----------------------------------------------------------------------------
 
+// short text for what a channel serves, to label its menu
+static string DevChannelSummary( int Channel )
+{
+    DEV::ChannelInfo Info = Console.DevServer.GetChannelInfo( Channel );
+
+    if( !Info.Error.empty() )
+      return "error";
+
+    DEV::DeviceSpec Spec;
+    string Error;
+
+    if( Info.Spec.empty() || !DEV::DeviceSpec::Parse( Info.Spec, Spec, Error ) )
+      return "off";
+
+    switch( Spec.Kind )
+    {
+        case DEV::DeviceSpec::Storage:      return "storage " + GetPathFileName( Spec.Path );
+        case DEV::DeviceSpec::SerialEcho:   return "serial echo";
+        case DEV::DeviceSpec::SerialStdio:  return "serial console";
+        case DEV::DeviceSpec::SerialTcp:    return "serial tcp " + to_string( Spec.Port );
+        default:                            return "off";
+    }
+}
+
+// dimmed text in a menu
+static void DevMenuNote( const string& Text )
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+    ImGui::Text( "%s", Text.c_str() );
+    ImGui::PopStyleVar();
+}
+
+// v32dev server: lets a program use files and a terminal of this computer through
+// the memory card, with no host program (see docs/v32dev/PROTOCOL.md)
+static void ProcessMenuDevServer()
+{
+    if( !ImGui::BeginMenu( "v32dev server" ) )
+      return;
+
+    bool Enabled = Console.IsDevServerEnabled();
+
+    if( ImGui::MenuItem( "Enabled", nullptr, Enabled, true ) )
+      Console.SetDevServerEnabled( !Enabled );
+
+    DevMenuNote( "Status: " + Console.GetDevServerStatus() );
+
+    if( Console.DevServer.IsControlledByEnvironment() )
+      DevMenuNote( "(set by V32DEV_SERVER; not saved)" );
+
+    ImGui::Separator();
+
+    for( int Channel = 0; Channel < DEV::Channels; Channel++ )
+    {
+        // (the part after ### is the menu's identity, so the label can change)
+        string Label = "Channel " + to_string( Channel ) + ": " + DevChannelSummary( Channel ) + "###v32devch" + to_string( Channel );
+
+        if( !ImGui::BeginMenu( Label.c_str() ) )
+          continue;
+
+        DEV::ChannelInfo Info = Console.DevServer.GetChannelInfo( Channel );
+
+        if( !Info.Error.empty() )
+            DevMenuNote( "Error: " + Info.Error );
+
+        else if( Info.Serving )
+        {
+            DevMenuNote( Info.Description );
+            DevMenuNote( string( Info.ProgramOpen? "program connected: " : "program not connected: " )
+                       + to_string( (unsigned long long)Info.WordsFromProgram ) + " words in, "
+                       + to_string( (unsigned long long)Info.WordsToProgram ) + " words out" );
+        }
+
+        else if( !Info.Spec.empty() )
+            DevMenuNote( "Will serve: " + Info.Spec );
+
+        ImGui::Separator();
+
+        if( ImGui::MenuItem( "Off", nullptr, Info.Spec.empty(), true ) )
+          GUI_SetDevChannel( Channel, "" );
+
+        ImGui::Separator();
+
+        if( ImGui::MenuItem( "Storage: open file..." ) )
+        {
+            PendingAction = DelayedFileActions::DevChannelOpenStorage;
+            PendingDevChannel = Channel;
+        }
+
+        if( ImGui::MenuItem( "Storage: new image..." ) )
+        {
+            PendingAction = DelayedFileActions::DevChannelNewStorage;
+            PendingDevChannel = Channel;
+        }
+
+        ImGui::MenuItem( "Byte mode (next file)", nullptr, &DevStorageBytesMode );
+        ImGui::MenuItem( "Read only (next file)", nullptr, &DevStorageReadOnly );
+
+        ImGui::Separator();
+
+        if( ImGui::MenuItem( "Serial: echo", nullptr, Info.Spec == "serial:echo", true ) )
+          GUI_SetDevChannel( Channel, "serial:echo" );
+
+        if( ImGui::MenuItem( "Serial: console (stdin/stdout)", nullptr, Info.Spec == "serial:stdio", true ) )
+          GUI_SetDevChannel( Channel, "serial:stdio" );
+
+        string TcpSpec = "serial:tcp=" + to_string( DevTcpPort( Channel ) );
+        string TcpLabel = "Serial: TCP 127.0.0.1:" + to_string( DevTcpPort( Channel ) );
+
+        if( ImGui::MenuItem( TcpLabel.c_str(), nullptr, Info.Spec == TcpSpec, true ) )
+          GUI_SetDevChannel( Channel, TcpSpec );
+
+        ImGui::EndMenu();
+    }
+
+    ImGui::EndMenu();
+}
+
+// -----------------------------------------------------------------------------
+
 void ProcessMenuMemoryCard()
 {
     if( !ImGui::BeginMenu( Texts(TextIDs::Menus_Card) ) )
@@ -1040,6 +1225,11 @@ void ProcessMenuMemoryCard()
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
         ImGui::Text( "%s", Texts(TextIDs::Options_CardsAuto) );
         ImGui::PopStyleVar();
+
+        // (the server works the same with cards that are handled automatically)
+        ImGui::Separator();
+        ProcessMenuDevServer();
+
         ImGui::EndMenu();
         return;
     }
@@ -1093,6 +1283,9 @@ void ProcessMenuMemoryCard()
     if( !RecentMemoryCardPaths.empty() )
       if( ImGui::MenuItem( Texts(TextIDs::Card_RecentClear) ) )
         RecentMemoryCardPaths.clear();
+    
+    ImGui::Separator();
+    ProcessMenuDevServer();
     
     ImGui::EndMenu();
 }
@@ -1635,6 +1828,14 @@ void RenderGUI()
             GUI_ChangeCartridge( PendingActionPath );
             break;
             
+        // v32dev server channel files
+        case DelayedFileActions::DevChannelOpenStorage:
+            GUI_DevChannelStorage( PendingDevChannel, false );
+            break;
+        case DelayedFileActions::DevChannelNewStorage:
+            GUI_DevChannelStorage( PendingDevChannel, true );
+            break;
+        
         // memory card file actions
         case DelayedFileActions::CreateMemoryCard:
             GUI_CreateMemoryCard();

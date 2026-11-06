@@ -7,6 +7,7 @@ add_library(V32ConsoleLogic STATIC
     V32Console.cpp
     V32CPU.cpp
     V32CPUProcessors.cpp
+    V32DevServer.cpp
     V32GamepadController.cpp
     V32GPU.cpp
     V32GPUWriters.cpp
@@ -23,3 +24,8 @@ set_property(TARGET V32ConsoleLogic PROPERTY CXX_STANDARD 11)
 
 # under Linux this may be needed for linkage later
 set_property(TARGET V32ConsoleLogic PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# the v32dev server's serial:tcp device uses sockets (Windows needs Winsock)
+if(WIN32)
+    target_link_libraries(V32ConsoleLogic ws2_32)
+endif()

@@ -14,6 +14,7 @@
     #include "V32CartridgeController.hpp"
     #include "V32MemoryCardController.hpp"
     #include "V32NullController.hpp"
+    #include "V32DevServer.hpp"
     
     // include C/C++ headers
     #include <string>         // [ C++ STL ] Strings
@@ -42,6 +43,9 @@ namespace V32
             V32CartridgeController CartridgeController;
             V32MemoryCardController MemoryCardController;
             V32NullController NullController;
+
+            // v32dev server built into the console (serves the card mailbox)
+            DEV::Server DevServer;
             
             // components on motherboard slots
             V32CPU CPU;
@@ -111,6 +115,18 @@ namespace V32
             // (sync is done automatically at the start of every frame)
             void SyncMemoryCardMailbox();
             bool HasMemoryCardMailbox();
+
+            // v32dev embedded server: it serves the mailbox of the loaded card from
+            // inside the console, with no host program and no card file traffic.
+            // The configuration lives in DevServer; these tie it to the card
+            void SetDevServerEnabled( bool Enabled );
+            bool IsDevServerEnabled();
+            bool SetDevServerChannel( int Channel, const std::string& Spec, std::string& Error );
+            std::string GetDevServerStatus();
+            bool IsDevServerActive();
+            void AttachDevServer();
+            void DetachDevServer();
+            std::string DevServerBlockedReason;     // why an enabled server can't serve the card
             
             // gamepad management
             void SetGamepadConnection( int GamepadPort, bool Connected );

@@ -403,6 +403,9 @@ void SetDefaultSettings()
     // set automatic memory card handling
     Emulator.SetCardHandling( true );
     
+    // v32dev server off, with nothing on its channels
+    Console.DevServer.SetStoredConfig( DEV::ServerConfig() );
+    
     // set default slot for savestates
     SavestatesSlot = 1;
     
@@ -602,6 +605,23 @@ void LoadSettings( const string& FilePath )
             Gamepads.V32MouseCountsPerStep = CountsPerStep;
         }
         
+        // read the v32dev server configuration (optional)
+        XMLElement* DevServerElement = SettingsRoot->FirstChildElement( "v32dev-server" );
+        
+        if( DevServerElement )
+        {
+            DEV::ServerConfig DevConfig;
+            DevConfig.Enabled = GetRequiredYesNoAttribute( DevServerElement, "enabled" );
+            
+            for( int Channel = 0; Channel < DEV::Channels; Channel++ )
+            {
+                const char* Spec = DevServerElement->Attribute( ("channel" + to_string( Channel )).c_str() );
+                if( Spec ) DevConfig.Specs[ Channel ] = Spec;
+            }
+            
+            Console.DevServer.SetStoredConfig( DevConfig );
+        }
+        
         // save current savestate slot (optional)
         XMLElement* SavestatesElement = SettingsRoot->FirstChildElement( "savestates" );
         SavestatesSlot = 1;
@@ -767,6 +787,16 @@ void SaveSettings( const string& FilePath )
         XMLElement* V32MouseElement = CreatedDoc.NewElement( V32MOUSE_PROFILE_NAME );
         SettingsRoot->LinkEndChild( V32MouseElement );
         V32MouseElement->SetAttribute( "counts-per-step", Gamepads.V32MouseCountsPerStep );
+        
+        // save the v32dev server configuration
+        DEV::ServerConfig DevConfig = Console.DevServer.GetStoredConfig();
+        XMLElement* DevServerElement = CreatedDoc.NewElement( "v32dev-server" );
+        SettingsRoot->LinkEndChild( DevServerElement );
+        DevServerElement->SetAttribute( "enabled", DevConfig.Enabled? "yes" : "no" );
+        
+        for( int Channel = 0; Channel < DEV::Channels; Channel++ )
+          if( !DevConfig.Specs[ Channel ].empty() )
+            DevServerElement->SetAttribute( ("channel" + to_string( Channel )).c_str(), DevConfig.Specs[ Channel ].c_str() );
         
         // save current savestate slot
         XMLElement* SavestatesElement = CreatedDoc.NewElement( "savestates" );
