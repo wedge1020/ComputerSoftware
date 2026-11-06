@@ -765,12 +765,12 @@ namespace DEV
                     Descriptor.events = POLLIN;
                     Descriptor.revents = 0;
 
-                    if( poll( &Descriptor, 1, 0 ) <= 0 )
+                    if( ::poll( &Descriptor, 1, 0 ) <= 0 )
                       return;
 
                     unsigned char Buffer[ 256 ];
                     size_t Wanted = min< size_t >( sizeof( Buffer ), MaxWords - Inbox.size() );
-                    ssize_t Count = read( 0, Buffer, Wanted );
+                    ssize_t Count = ::read( 0, Buffer, Wanted );
 
                     if( Count > 0 )
                       for( ssize_t i = 0; i < Count; i++ )
@@ -795,7 +795,7 @@ namespace DEV
         #else
           typedef int SocketHandle;
           const SocketHandle NoSocket = -1;
-          #define CLOSE_SOCKET( s ) close( s )
+          #define CLOSE_SOCKET( s ) ::close( s )
           #define SOCKET_WOULD_BLOCK() (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
         #endif
 
@@ -809,8 +809,8 @@ namespace DEV
             u_long Mode = 1;
             return ioctlsocket( Socket, FIONBIO, &Mode ) == 0;
           #else
-            int Flags = fcntl( Socket, F_GETFL, 0 );
-            return Flags >= 0 && fcntl( Socket, F_SETFL, Flags | O_NONBLOCK ) == 0;
+            int Flags = ::fcntl( Socket, F_GETFL, 0 );
+            return Flags >= 0 && ::fcntl( Socket, F_SETFL, Flags | O_NONBLOCK ) == 0;
           #endif
         }
 
@@ -832,7 +832,7 @@ namespace DEV
         {
           #if defined(SO_NOSIGPIPE)
             int One = 1;
-            setsockopt( Socket, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&One, sizeof( One ) );
+            ::setsockopt( Socket, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&One, sizeof( One ) );
           #else
             (void)Socket;
           #endif
@@ -866,7 +866,7 @@ namespace DEV
                 {
                     while( Client != NoSocket && !Pending.empty() )
                     {
-                        int Sent = (int)send( Client, Pending.data(), (int)Pending.size(), MSG_NOSIGNAL );
+                        int Sent = (int)::send( Client, Pending.data(), (int)Pending.size(), MSG_NOSIGNAL );
 
                         if( Sent > 0 )
                             Pending.erase( 0, Sent );
@@ -881,7 +881,7 @@ namespace DEV
                 {
                     while( true )
                     {
-                        SocketHandle New = accept( Listener, nullptr, nullptr );
+                        SocketHandle New = ::accept( Listener, nullptr, nullptr );
 
                         if( New == NoSocket )
                           return;
@@ -894,7 +894,7 @@ namespace DEV
 
                         NoSigPipe( New );
                         int One = 1;
-                        setsockopt( New, IPPROTO_TCP, TCP_NODELAY, (const char*)&One, sizeof( One ) );
+                        ::setsockopt( New, IPPROTO_TCP, TCP_NODELAY, (const char*)&One, sizeof( One ) );
 
                         CloseClient();
                         Client = New;
@@ -916,7 +916,7 @@ namespace DEV
                 bool Open( string& Error )
                 {
                     StartNetworking();
-                    Listener = socket( AF_INET, SOCK_STREAM, 0 );
+                    Listener = ::socket( AF_INET, SOCK_STREAM, 0 );
 
                     if( Listener == NoSocket )
                     {
@@ -927,7 +927,7 @@ namespace DEV
                   #if !defined(_WIN32)
                     // (on Windows this option would let others share the port)
                     int One = 1;
-                    setsockopt( Listener, SOL_SOCKET, SO_REUSEADDR, (const char*)&One, sizeof( One ) );
+                    ::setsockopt( Listener, SOL_SOCKET, SO_REUSEADDR, (const char*)&One, sizeof( One ) );
                   #endif
 
                     struct sockaddr_in Address;
@@ -936,8 +936,8 @@ namespace DEV
                     Address.sin_port = htons( (unsigned short)Port );
                     Address.sin_addr.s_addr = htonl( INADDR_LOOPBACK );
 
-                    if( bind( Listener, (struct sockaddr*)&Address, sizeof( Address ) ) != 0
-                     || listen( Listener, 2 ) != 0
+                    if( ::bind( Listener, (struct sockaddr*)&Address, sizeof( Address ) ) != 0
+                     || ::listen( Listener, 2 ) != 0
                      || !SetNonBlocking( Listener ) )
                     {
                         Error = "cannot listen on 127.0.0.1:" + to_string( Port ) + " (is the port in use?)";
@@ -970,7 +970,7 @@ namespace DEV
 
                     unsigned char Buffer[ 512 ];
                     size_t Wanted = min< size_t >( sizeof( Buffer ), MaxWords - Inbox.size() );
-                    int Count = (int)recv( Client, (char*)Buffer, (int)Wanted, 0 );
+                    int Count = (int)::recv( Client, (char*)Buffer, (int)Wanted, 0 );
 
                     if( Count > 0 )
                       for( int i = 0; i < Count; i++ )
@@ -1000,7 +1000,7 @@ namespace DEV
                 static const size_t InboxLimit = 16 * 1024;
 
             public:
-                SerialDevice( unique_ptr< Endpoint >& Where ): Source( move( Where ) ), CurrentStatus( StatusReady ) {}
+                SerialDevice( unique_ptr< Endpoint >& Where ): Source( std::move( Where ) ), CurrentStatus( StatusReady ) {}
 
                 virtual uint32_t TypeWord() const { return MakeType( ClassChar, 1 ); }
                 virtual string Describe() const { return Source->Describe(); }
@@ -1411,7 +1411,7 @@ namespace DEV
             return;
         }
 
-        Devices[ Channel ] = move( Created );
+        Devices[ Channel ] = std::move( Created );
         Channels[ Channel ].Announce( Devices[ Channel ]->TypeWord(), Devices[ Channel ]->Descriptor(), StatusReady );
     }
 
