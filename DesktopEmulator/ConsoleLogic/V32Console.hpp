@@ -106,6 +106,11 @@ namespace V32
             bool HasMemoryCard();
             bool WasMemoryCardModified();
             std::string GetMemoryCardFileName();
+
+            // v32dev external mailbox in the memory card
+            // (sync is done automatically at the start of every frame)
+            void SyncMemoryCardMailbox();
+            bool HasMemoryCardMailbox();
             
             // gamepad management
             void SetGamepadConnection( int GamepadPort, bool Connected );
