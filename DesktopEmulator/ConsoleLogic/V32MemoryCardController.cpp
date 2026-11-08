@@ -16,6 +16,9 @@ namespace V32
         PendingSave = false;
         MailboxActive = false;
         Heartbeat = 0;
+        EmbeddedHost = false;
+        ServerInstalledHeader = false;
+        ServerActivatedMailbox = false;
         DirtyPages.assign( DEV::NumberOfPages, 0 );
     }
 
@@ -123,7 +126,15 @@ namespace V32
         struct Range { int32_t First; int32_t End; };
         std::vector< Range > Excluded;
 
-        if( MailboxActive )
+        if( MailboxActive && EmbeddedHost )
+        {
+            // the server lives in this process: the whole mailbox is volatile
+            // state, and none of it belongs in the card file
+            Range WholeRegion = { DEV::RegionStart, DEV::CardWords };
+            Excluded.push_back( WholeRegion );
+        }
+
+        else if( MailboxActive )
         {
             // header and host-owned area are contiguous
             Range HeaderAndHostArea = { DEV::RegionStart, DEV::CartAreaStart };
@@ -187,7 +198,8 @@ namespace V32
         }
 
         // PHASE 2: commit words of every cart-owned part that was touched
-        if( !MailboxActive )
+        // (an embedded server has no outside reader to order them for)
+        if( !MailboxActive || EmbeddedHost )
           return;
 
         for( int c = 0; c < DEV::Channels; c++ )

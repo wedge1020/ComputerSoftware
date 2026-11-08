@@ -119,6 +119,13 @@ namespace V32
             std::vector< V32Word > PollBuffer;
             uint32_t Heartbeat;
 
+            // v32dev embedded server (see V32DevServer.hpp). While one serves the
+            // mailbox, the host-owned area is its own and the mailbox is never
+            // read from or saved to the card file
+            bool EmbeddedHost;
+            bool ServerInstalledHeader;         // the server wrote the header (the file has none)
+            bool ServerActivatedMailbox;        // the server turned the mailbox on
+
         public:
 
             // instance handling

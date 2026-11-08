@@ -30,6 +30,9 @@ namespace V32
     
     V32Console::V32Console()
     {
+        // V32DEV_SERVER and V32DEV_CH0..3 can configure the embedded v32dev server
+        DevServer.ApplyEnvironment();
+
         // connect memory bus master
         CPU.MemoryBus = &MemoryBus;
         MemoryBus.Master = &CPU;
@@ -838,6 +841,9 @@ namespace V32
             }
         }
 
+        // an enabled v32dev server starts serving this card
+        AttachDevServer();
+
         Callbacks::LogLine( "Finished loading memory card" );
     }
     
@@ -853,6 +859,9 @@ namespace V32
         if( MemoryCardController.PendingSave )
           SaveMemoryCard();
         
+        // the v32dev server stops serving while the card memory still exists
+        DetachDevServer();
+
         // remove the card memory
         MemoryCardController.Disconnect();
 
@@ -931,6 +940,14 @@ namespace V32
         MemoryCardController.Heartbeat++;
         MemoryCardController.Memory[ DEV::RegionStart + DEV::H_EmulatorBeat ].AsInteger = (int32_t)MemoryCardController.Heartbeat;
 
+        // with the server built in, the host-owned area is the server's: it serves the
+        // channels now (the program is not running) and nothing is read from the file
+        if( MemoryCardController.EmbeddedHost )
+        {
+            DevServer.Poll();
+            return;
+        }
+
         // read the whole host-owned area from the file
         ifstream& PollFile = MemoryCardController.PollFile;
         vector< V32Word >& Buffer = MemoryCardController.PollBuffer;
@@ -973,6 +990,152 @@ namespace V32
     bool V32Console::HasMemoryCardMailbox()
     {
         return MemoryCardController.MailboxActive;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    // =============================================================================
+    //      V32DEV EMBEDDED SERVER
+    // =============================================================================
+
+    void V32Console::SetDevServerEnabled( bool Enabled )
+    {
+        DevServer.SetEnabled( Enabled );
+
+        if( Enabled )
+            AttachDevServer();
+        else
+        {
+            DetachDevServer();
+            DevServerBlockedReason.clear();
+        }
+    }
+
+    // -----------------------------------------------------------------------------
+
+    bool V32Console::IsDevServerEnabled()
+    {
+        return DevServer.IsEnabled();
+    }
+
+    // -----------------------------------------------------------------------------
+
+    bool V32Console::IsDevServerActive()
+    {
+        return DevServer.IsAttached();
+    }
+
+    // -----------------------------------------------------------------------------
+
+    bool V32Console::SetDevServerChannel( int Channel, const std::string& Spec, std::string& Error )
+    {
+        return DevServer.SetSpec( Channel, Spec, Error );
+    }
+
+    // -----------------------------------------------------------------------------
+
+    std::string V32Console::GetDevServerStatus()
+    {
+        if( !DevServer.IsEnabled() )
+          return "off";
+
+        if( DevServer.IsAttached() )
+          return "serving the memory card";
+
+        if( !HasMemoryCard() )
+          return "waiting for a memory card";
+
+        return "cannot serve this card: " + DevServerBlockedReason;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    // Makes the loaded card's mailbox the server's. A card that is not formatted for
+    // v32dev gets its mailbox header in memory only (the file is not touched), as
+    // long as its last 64 KiB are free. A formatted card works too: the server just
+    // takes the place of the host program
+    void V32Console::AttachDevServer()
+    {
+        DevServerBlockedReason.clear();
+        V32MemoryCardController& Card = MemoryCardController;
+
+        if( !DevServer.IsEnabled() || !HasMemoryCard() || DevServer.IsAttached() )
+          return;
+
+        const char* DisableSetting = getenv( "V32DEV_DISABLE" );
+
+        if( DisableSetting != nullptr && strcmp( DisableSetting, "0" ) != 0 )
+        {
+            DevServerBlockedReason = "V32DEV_DISABLE is set";
+            return;
+        }
+
+        if( !Card.MailboxActive )
+        {
+            if( !Card.HeaderIsValid() )
+            {
+                for( int32_t i = DEV::RegionStart; i < DEV::CardWords; i++ )
+                {
+                    if( Card.Memory[ i ].AsInteger != 0 )
+                    {
+                        DevServerBlockedReason = "the last 64 KiB of the card hold data";
+                        return;
+                    }
+                }
+
+                V32Word* Header = &Card.Memory[ DEV::RegionStart ];
+                Header[ DEV::H_Magic ].AsInteger        = DEV::Magic;
+                Header[ DEV::H_Version ].AsInteger      = DEV::Version;
+                Header[ DEV::H_RegionWords ].AsInteger  = DEV::RegionWords;
+                Header[ DEV::H_Channels ].AsInteger     = DEV::Channels;
+                Header[ DEV::H_PartWords ].AsInteger    = DEV::PartWords;
+                Header[ DEV::H_ControlWords ].AsInteger = DEV::ControlWords;
+                Card.ServerInstalledHeader = true;
+            }
+
+            Card.MailboxActive = true;
+            Card.ServerActivatedMailbox = true;
+        }
+
+        // programs see a live mailbox (these words never go to the file)
+        Card.Memory[ DEV::RegionStart + DEV::H_EmulatorFlags ].AsInteger = DEV::EmuFlagLive;
+        Card.Memory[ DEV::RegionStart + DEV::H_EmulatorBeat ].AsInteger = (int32_t)Card.Heartbeat;
+
+        Card.EmbeddedHost = true;
+        DevServer.Attach( &Card.Memory[ 0 ] );
+        Callbacks::LogLine( "v32dev: embedded server active" );
+    }
+
+    // -----------------------------------------------------------------------------
+
+    void V32Console::DetachDevServer()
+    {
+        V32MemoryCardController& Card = MemoryCardController;
+
+        if( !DevServer.IsAttached() )
+          return;
+
+        // (this needs the card memory, so it comes first)
+        DevServer.Detach();
+        Card.EmbeddedHost = false;
+
+        // what the program wrote in the mailbox while the server served it is not
+        // card data and must not be saved
+        for( int32_t Page = DEV::RegionStart >> DEV::PageShift; Page < DEV::NumberOfPages; Page++ )
+          Card.DirtyPages[ Page ] = 0;
+
+        // a mailbox the server made up goes away with it, so programs see a
+        // plain card again
+        if( Card.ServerInstalledHeader )
+          for( int32_t i = DEV::RegionStart; i < DEV::CardWords; i++ )
+            Card.Memory[ i ].AsInteger = 0;
+
+        if( Card.ServerActivatedMailbox )
+          Card.MailboxActive = false;
+
+        Card.ServerInstalledHeader = false;
+        Card.ServerActivatedMailbox = false;
+        Callbacks::LogLine( "v32dev: embedded server stopped" );
     }
     
     // -----------------------------------------------------------------------------
