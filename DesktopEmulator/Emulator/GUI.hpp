@@ -57,6 +57,7 @@ void GUI_AutoUpdateMemoryCard();
 void GUI_UnloadCartridge();
 void GUI_LoadCartridge( std::string CartridgePath = "" );
 void GUI_ChangeCartridge( std::string CartridgePath = "" );
+void GUI_LoadBios( std::string BiosPath = "" );
 void GUI_SaveScreenshot( std::string FilePath = "" );
 void GUI_LoadState();
 void GUI_SaveState();

@@ -5,6 +5,7 @@
     
     // include C/C++ headers
     #include <string>           // [ C++ STL ] Strings
+    #include <vector>           // [ C++ STL ] Vectors
     #include <iostream>         // [ C++ STL ] I/O streams
     #include <fstream>          // [ C++ STL ] File streams
     #include <stdio.h>          // [ ANSI C ] Standard I/O
@@ -37,6 +38,10 @@ std::string GetPathFileName( const std::string& FilePath );
 bool IsFileNameValid( const std::string& FileName );
 bool FileExists( const std::string &FilePath );
 bool DirectoryExists( const std::string &Path );
+
+// directory listing: names (not paths) of the files in a directory that
+// have a given extension (compared ignoring case), sorted alphabetically
+std::vector< std::string > ListFilesWithExtension( const std::string& Directory, const std::string& Extension );
 
 
 // =============================================================================

@@ -21,6 +21,8 @@
     // include C/C++ headers
     #include <time.h>               // [ ANSI C ] Time and date
     #include <stdexcept>            // [ C++ STL ] Exceptions
+    #include <vector>               // [ C++ STL ] Vectors
+    #include <cctype>               // [ ANSI C ] Character types
     
     // include osdialog headers
     #include <osdialog/osdialog.h>  // [ Dear ImGui ] Main header
@@ -659,6 +661,92 @@ void GUI_ChangeCartridge( string CartridgePath )
 
 // -----------------------------------------------------------------------------
 
+// the BIOS files that are offered in the BIOS menu are the ones in this folder
+string GetBiosFolder()
+{
+    return EmulatorFolder + "Bios" + PathSeparator;
+}
+
+// -----------------------------------------------------------------------------
+
+// full path of the BIOS that is currently loaded; the startup BIOS
+// is not loaded from the GUI, so its path is obtained from the settings
+static string LoadedBiosPath;
+static string LastBiosDirectory;
+
+string GetLoadedBiosPath()
+{
+    if( LoadedBiosPath.empty() && Console.HasBios() )
+      LoadedBiosPath = GetBiosFolder() + BiosFileName;
+    
+    return LoadedBiosPath;
+}
+
+// -----------------------------------------------------------------------------
+
+// loads a BIOS, replacing the current one. Like for cartridges this
+// is only allowed while the console is off (no live swapping)
+void GUI_LoadBios( string BiosPath )
+{
+    if( Emulator.IsPowerOn() )
+      return;
+    
+    try
+    {
+        if( BiosPath.empty() )
+          BiosPath = GetLoadFilePath( "Vircon32 BIOS (*.v32):v32", LastBiosDirectory.empty()? GetBiosFolder() : LastBiosDirectory );
+        
+        if( !BiosPath.empty() )
+        {
+            LastBiosDirectory = GetPathDirectory( BiosPath );
+            
+            // remember what we had, in case the new one fails
+            bool HadBios = Console.HasBios();
+            string PreviousBiosPath = GetLoadedBiosPath();
+            
+            try
+            {
+                Console.LoadBios( BiosPath );
+            }
+            
+            catch( const exception& )
+            {
+                // a failed load can leave the BIOS half loaded:
+                // clean it up and go back to the previous one
+                Console.UnloadBios();
+                LoadedBiosPath = "";
+                
+                if( HadBios )
+                {
+                    try
+                    {
+                        Console.LoadBios( PreviousBiosPath );
+                        LoadedBiosPath = PreviousBiosPath;
+                    }
+                    catch( const exception& ) { Console.UnloadBios(); }
+                }
+                
+                throw;
+            }
+            
+            LoadedBiosPath = BiosPath;
+            
+            // when the BIOS is in the BIOS folder, make it also
+            // the startup BIOS (this is what the settings file saves)
+            if( GetPathDirectory( BiosPath ) == GetBiosFolder() )
+              BiosFileName = GetPathFileName( BiosPath );
+        }
+    }
+    
+    catch( const exception& e )
+    {
+        string Message = Texts( TextIDs::Errors_LoadBios_Label ) + string(e.what());
+        DelayedMessageBox( SDL_MESSAGEBOX_ERROR, "Error", Message.c_str() );
+    }
+}
+
+// -----------------------------------------------------------------------------
+
 void GUI_SaveScreenshot( string FilePath )
 {
     try
@@ -764,7 +852,8 @@ enum class DelayedFileActions
     CreateMemoryCard,
     UnloadMemoryCard,
     LoadMemoryCard,
-    ChangeMemoryCard
+    ChangeMemoryCard,
+    LoadBios
 };
 
 DelayedFileActions PendingAction = DelayedFileActions::None;
@@ -1004,6 +1093,108 @@ void ProcessMenuMemoryCard()
     if( !RecentMemoryCardPaths.empty() )
       if( ImGui::MenuItem( Texts(TextIDs::Card_RecentClear) ) )
         RecentMemoryCardPaths.clear();
+    
+    ImGui::EndMenu();
+}
+
+// -----------------------------------------------------------------------------
+
+void ProcessMenuBios()
+{
+    if( !ImGui::BeginMenu( Texts(TextIDs::Menus_Bios) ) )
+      return;
+    
+    // first, display the current BIOS
+    if( !Console.HasBios() )
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+        ImGui::Text( "%s", Texts(TextIDs::Bios_NoBios) );
+        ImGui::PopStyleVar();
+        ImGui::Separator();
+    }
+    else
+    {
+        string DisplayedName = "[ " + Console.BiosFileName + " ]";
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+        ImGui::Text( "%s", DisplayedName.c_str() );
+        ImGui::PopStyleVar();
+        ImGui::Separator();
+    }
+    
+    // no live swapping: the BIOS can only be changed while the console is off
+    if( Emulator.IsPowerOn() )
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+        ImGui::Text( "%s", Texts(TextIDs::Bios_Locked) );
+        ImGui::PopStyleVar();
+        ImGui::EndMenu();
+        return;
+    }
+    
+    // choose any BIOS file (when there is none this is "Load")
+    if( !Console.HasBios() )
+    {
+        if( ImGui::MenuItem( Texts(TextIDs::Bios_Load) ) )
+          PendingAction = DelayedFileActions::LoadBios;
+    }
+    else
+    {
+        if( ImGui::MenuItem( Texts(TextIDs::Bios_Change) ) )
+          PendingAction = DelayedFileActions::LoadBios;
+    }
+    
+    // find the files in the BIOS folder; the standard BIOS
+    // is always the first one, when it is available
+    string BiosFolder = GetBiosFolder();
+    string StandardBios = "StandardBios.v32";
+    vector< string > BiosFiles = ListFilesWithExtension( BiosFolder, "v32" );
+    
+    bool StandardBiosFound = false;
+    
+    for( auto Position = BiosFiles.begin(); Position != BiosFiles.end(); Position++ )
+    {
+        string Lowercase = *Position;
+        
+        for( char& Character: Lowercase )
+          Character = tolower( (unsigned char)Character );
+        
+        if( Lowercase == "standardbios.v32" )
+        {
+            StandardBios = *Position;
+            BiosFiles.erase( Position );
+            StandardBiosFound = true;
+            break;
+        }
+    }
+    
+    if( StandardBiosFound || FileExists( BiosFolder + StandardBios ) )
+      BiosFiles.insert( BiosFiles.begin(), StandardBios );
+    
+    // show title for the list of files
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+    {
+        ImGui::Separator();
+        ImGui::Text( "%s", Texts(TextIDs::Bios_ListTitle) );
+        
+        if( BiosFiles.empty() )
+          ImGui::Text( "%s", Texts(TextIDs::Bios_ListEmpty) );
+    }
+    ImGui::PopStyleVar();
+    
+    // show the list of files, marking the current one
+    string CurrentBiosPath = GetLoadedBiosPath();
+    
+    for( string& BiosFile: BiosFiles )
+    {
+        string BiosPath = BiosFolder + BiosFile;
+        bool IsCurrent = Console.HasBios() && (BiosPath == CurrentBiosPath);
+        
+        if( ImGui::MenuItem( BiosFile.c_str(), nullptr, IsCurrent, true ) && !IsCurrent )
+        {
+            PendingAction = DelayedFileActions::LoadBios;
+            PendingActionPath = BiosPath;
+        }
+    }
     
     ImGui::EndMenu();
 }
@@ -1399,6 +1590,7 @@ void RenderGUI()
         ProcessMenuConsole();
         ProcessMenuCartridge();
         ProcessMenuMemoryCard();
+        ProcessMenuBios();
         ProcessMenuGamepads();
         ProcessMenuOptions();
         ProcessMenuHelp();
@@ -1455,6 +1647,11 @@ void RenderGUI()
             break;
         case DelayedFileActions::ChangeMemoryCard:
             GUI_ChangeMemoryCard( PendingActionPath );
+            break;
+        
+        // BIOS file actions
+        case DelayedFileActions::LoadBios:
+            GUI_LoadBios( PendingActionPath );
             break;
         
         // in other cases no actions are performed
